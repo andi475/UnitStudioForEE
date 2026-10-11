@@ -1,0 +1,16 @@
+schema_version = "1.0.0"
+
+id = "ee_unit_studio"
+version = "1.0.15"
+name = "EE Unit Studio (Empire Earth)"
+tagline = "Unofficial modding tool: edit Empire Earth units in Blender"
+maintainer = "UnitMod"
+type = "add-on"
+tags = ["Import-Export", "Game Engine"]
+
+blender_version_min = "4.2.0"
+
+license = ["SPDX:MIT"]
+
+[permissions]
+files = "Reads and writes the Empire Earth game folder"

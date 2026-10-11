@@ -1,0 +1,149 @@
+# Unit Studio for EE
+
+**An unofficial, fan-made tool for editing and adding units in Empire Earth: The Art of Conquest.**
+
+> This is just a little hobby project work in progress, don't expect everyting to work perfectly
+> This project is not affiliated with, endorsed by or connected to the developers, publishers or rights holders of
+> Empire Earth. "Empire Earth" is used only to describe which game the tool works with; all trademarks belong to their
+> respective owners. The project contains **no files, graphics, models, sounds, texts or other content from the game**.
+> You need your own, legally obtained copy of *Empire Earth* with *The Art of Conquest* to use it. The tool only reads
+> and changes the game files of that copy on your own computer.
+
+With it you can:
+
+* replace a unit's 3D model and texture with your own, made in Blender,
+* change a unit's name, hit points, attack, range, cost, build time and animation frames,
+* create new trainable units based on existing ones,
+* import the game's models into Blender (on your own computer) as a reference for size, animation and attachment points.
+
+## Requirements
+
+* *Empire Earth: The Art of Conquest* installed.
+* Blender (5.2)
+
+## Installation
+
+Drag and Drop the zip file into a blender window
+
+or
+
+Blender → Edit → Preferences → Add-ons → ▾ menu (top right) → **Install from Disk…** → pick
+`ee_unit_studio-1.0.15.zip`. 
+
+Then open the 3D Viewport sidebar (press **N**) → tab **Empire Earth**.
+
+## Usage
+
+1. Paste the folder of *The Art of Conquest* (the one containing `Language.dll`) into the path field and click
+   **Load Units**. The original *Empire Earth* folder next to it is found automatically (most original models are
+   stored there); if yours is somewhere else, set **Base Game Folder** in the add-on preferences.
+2. Pick a unit in the list. The **search field** above it filters as you type: every word must appear in the unit's
+   name or internal name (`long bow`, `tank`, `inf10`), and `#20` finds unit number 20. **Trainable only** hides
+   buildings, animals and other objects.
+3. **Read Model from Game** imports the unit with its texture, every animation frame (as shape keys) and its tag points
+   (empties such as `attack`, `impact_00`). Timeline markers like `ee_walk 31-45` show which frames belong to which
+   animation. With the trash-can toggle next to the button switched on, the previously imported model is deleted first
+   (only objects created by an import, including copies of them; your own objects stay).
+4. Change **Name, Hit Points, Attack, Range, Cost, Build Time** or the **Animation Frames**, then click
+   **Write Changes to Game**.
+5. To give the unit your own model, tick **Use Active Mesh as Model**, select your mesh and write. The scene's frame
+   range is exported (game frame 0 = the scene's start frame); keep it consistent with the animation frames.
+6. **Create New Unit** makes a new unit based on the selected one, with the values above (and the active mesh, if
+   ticked). It gets its own button in the same buildings. **Epoch** 0 keeps the base unit's epoch.
+   **Available in Its Epoch** (on by default) makes it trainable as soon as that epoch is reached; switched off, it
+   only becomes trainable together with its base unit (for example after the upgrade an upgrade-line unit needs). For
+   units you created, the same checkbox appears among the unit's fields.
+7. **Reset Unit to Original** puts the selected unit back as it was in the original game (name, stats, cost, build
+   time, button, model, texture, animations) without touching any other unit; a building keeps the units you created
+   for it. Not available for units you created yourself.
+8. **Restore Original Game Files** undoes every change.
+
+Every write goes straight into the game files and takes a few seconds; close the game first. The first write backs
+up `Data\data.ssa` and `Language.dll` as `*.orig`.
+
+The add-on also adds File → Import / Export → **Empire Earth Model (.cem)** for working with model files directly.
+
+### Making a model
+
+* Import a similar game unit and match its size and orientation. Infantry is about 1 unit tall, standing on z = 0.
+* Any animation works (armature, shape keys, modifiers): the exporter records the evaluated mesh at every frame.
+* Faces with a material whose name contains **player color** get the team color.
+* Each material's **Image Texture** node is exported. Several images are allowed; they are stored together and scaled
+  to the size of the first one (power of two, e.g. 128×128 or 256×256).
+* The texture's **alpha channel is transparency**: the game cuts parts out where alpha is 0.
+* Empties parented to the mesh become **tag points**: where shots start (`weapon_mount_00`), fire and explosions appear
+  (`2dfire_0`, `end_2dfire_01`, `2dexplosion_0`), hits land (`impact_00`) and so on. The game looks them up by name and
+  can freeze when one is missing, so every tag point of the unit's original model that your scene lacks is copied from
+  the original automatically.
+* Meshes parented directly to the main mesh are exported as **sub-models** (turrets, propellers, wheels). If there are
+  none, the original sub-models are kept.
+* The unit's animation frames must exist in your model; writing is refused otherwise.
+* Keep it low-poly: the game's own infantry has roughly 200–400 triangles.
+
+**Sharing your work:** only share models and textures you made yourself. Do not share files exported from or based on
+the game's own models and textures, and never share modified game files (`data.ssa`, `Language.dll`) – let other
+players apply your changes to their own copy with this tool instead.
+
+## Command line (optional)
+
+Place this folder inside the game folder of *The Art of Conquest* (next to `Language.dll`), then:
+
+```
+py ee_unitmod.py list bow                   # find unit names
+py ee_unitmod.py extract "Inf01 - Clubman"  # copy a unit's model + texture into extracted\ (for your own use)
+py ee_unitmod.py install                    # restore the original game files, then apply units.json
+py ee_unitmod.py uninstall                  # put the original game files back
+```
+
+`install` always starts from the original files, so it also removes changes made with the add-on.
+
+| `units.json` key | meaning |
+|---|---|
+| `name` (required) | name of the new unit |
+| `base` (required) | unit to copy (name from `list`, or its number) |
+| `epoch` | 1 = Prehistoric … 15 = Space; default: the base unit's |
+| `available_now` | `true` (default): trainable as soon as its epoch is reached; `false`: together with the base unit |
+| `hp`, `attack`, `range` | stats (range is 0.5 for melee units) |
+| `food`, `wood`, `stone`, `gold`, `iron` | cost |
+| `build_time` | seconds |
+| `button_slot` | position in the building's panel; picked automatically if left out |
+| `model`, `texture` | your own `.cem` / `.sst` (or uncompressed `.tga`) file, path relative to this folder |
+| `animations` | e.g. `{"walk": [31, 45], "death": [46, 62]}`; slots `idle`, `walk`, `attack`, `attack2`, `death` |
+| `icon` | an existing button texture of the game, e.g. `textures\\but_maceman_03T.sst` |
+| `raw_object_fields` | `{"offset": value}` written straight into the unit's 1960-byte record (experts only) |
+
+## Limits
+
+* The computer players do not train new units (but replaced ones should work).
+* Multiplayer works only if every player has the same changes.
+* Armor and movement speed cannot be edited yet.
+* A few game models (version 0x30001 of the model format) cannot be imported yet.
+
+## How it works
+
+Technical notes on the file formats, found by analysing the data files for compatibility:
+
+* `Data\data.ssa` is an archive (`rass` header, sorted lower-case file table); every file inside is PKWARE-DCL
+  compressed behind a `PK01` header. *The Art of Conquest* also reads the original game's archive.
+* `db\dbobjects.dat`: fixed 1960-byte records. Offsets: id 116, hp 120, range 132, attack 192, button 296, graphics 300,
+  name string id 472, number of tech-list entries 884, tech key 888, tech list 1156 (200 ints). The game reads only as
+  many list entries as the count says.
+* `db\dbtechtree.dat`: one section per epoch with variable-length records; buildings refer to a tech by
+  key = (section + 1) × 1000 + index − 1. Costs: wood 124, stone 128, gold 136, iron 144, food 148; build time (ms) 152;
+  prerequisite 156; created unit 172; button 176; event 116.
+* `db\dbbuttons.dat`: 224-byte records: name, texture, id at 204, panel slot at 216.
+* `db\dbgraphics.dat`: 33 length-prefixed strings (name, model, texture, 30 extra texture slots) + 716 fixed bytes with
+  the animation table.
+* `db\dbevents.dat` and `db\dbeffects.dat`: researching a tech fires its event, whose effects can enable (type 8) or
+  disable (type 9) other techs.
+* Unit names live in the string table of `Language.dll`; new names are added from id 40000 up.
+* The `.cem` model and `.sst` texture formats are described at the top of `ee_unit_studio\cem.py`.
+
+## License and credits
+
+Unit Studio for EE is free software under the **MIT License** – see `LICENSE`.
+
+It includes an altered version (a Python port) of `blast.c` by Mark Adler, from zlib's contrib folder, under the zlib
+license; see `NOTICE.md`.
+
+The tool is provided without any warranty. Back up your game before using it; you use it at your own risk.

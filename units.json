@@ -1,0 +1,24 @@
+{
+  "units": [
+    {
+      "name": "Berserker",
+      "base": "Inf01 - Clubman",
+      "hp": 220,
+      "attack": 14,
+      "food": 45,
+      "wood": 25,
+      "build_time": 30
+    },
+    {
+      "name": "Heavy Archer",
+      "base": "Arch03 - Simple Bowman",
+      "epoch": 4,
+      "hp": 260,
+      "attack": 14,
+      "range": 7.0,
+      "wood": 40,
+      "gold": 40,
+      "build_time": 40
+    }
+  ]
+}
