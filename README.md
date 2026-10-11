@@ -9,6 +9,8 @@
 > You need your own, legally obtained copy of *Empire Earth* with *The Art of Conquest* to use it. The tool only reads
 > and changes the game files of that copy on your own computer.
 
+![Unit Studio for EE in Blender](docs/screenshot.png)
+
 With it you can:
 
 * replace a unit's 3D model and texture with your own, made in Blender,
