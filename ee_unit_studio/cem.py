@@ -40,13 +40,18 @@ def _wstr(s):
     b = s.encode('latin1', 'replace') + b'\0'
     return struct.pack('<I', len(b)) + b
 
+class UnsupportedModel(ValueError):
+    """A model in a format this add-on cannot read (11 of the game's models use
+    version 0x30001 instead of 2)."""
+
+
 def read_cem(d, off=0):
     """Returns (model dict, end offset)."""
     if d[off:off + 4] != b'SSMF':
         raise ValueError('not a CEM model')
     ver, ntri, nvert, ntag, nmat, nframe, nchild, nlod = struct.unpack_from('<8I', d, off + 4)
     if ver != 2:
-        raise ValueError('unsupported CEM version %#x (only version 2 is supported)' % ver)
+        raise UnsupportedModel('this model uses a newer format (version %#x) that this add-on cannot read yet' % ver)
     name, p = _rstr(d, off + 36)
     center = struct.unpack_from('<3f', d, p)
     p += 12
@@ -550,7 +555,10 @@ if bpy:
         Returns (cem bytes, sst bytes or None, message)."""
         scene = context.scene
         frames = list(range(scene.frame_start, scene.frame_end + 1))
-        ref = read_cem(reference)[0] if reference else None
+        try:
+            ref, unreadable_ref = (read_cem(reference)[0] if reference else None), False
+        except UnsupportedModel:  # the original's tag points and sub-models cannot be copied
+            ref, unreadable_ref = None, True
         child_objs = sorted((c for c in obj.children if c.type == 'MESH'), key=lambda c: c.name)
 
         images = []
@@ -578,6 +586,8 @@ if bpy:
             msg += ' (placed automatically; add empties as children of the mesh to control them)'
         if from_ref:
             msg += ' (taken from the original model: %s)' % ', '.join(from_ref)
+        if unreadable_ref:
+            msg += ' (the original model uses a format that cannot be read, so its tag points could not be copied)'
         ref_children = ref['children'] if ref else []
         if len(parts) > 1:
             kids = [p.build(images, ref_children[i] if i < len(ref_children) else None)[0]

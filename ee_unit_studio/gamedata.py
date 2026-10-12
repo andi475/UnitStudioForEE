@@ -312,7 +312,11 @@ ENABLE_TECH = 8
 SET_GRAPHICS = 6  # give the object at 20 the graphics record at 36 (epoch looks)
 
 # Field offsets, identified by comparing known units.
-OBJ = dict(id=116, hp=120, range=132, attack=192, button=296, graphics=300, name_string=472,
+OBJ = dict(id=116, hp=120, range=132, line_of_sight=136,
+           reload_time=140,  # seconds between attacks
+           speed=148, attack=192,
+           armor=196,  # 6 ints in the order of ARMORS
+           button=296, graphics=300, name_string=472,
            tech_count=884,  # how many entries of tech_list the game reads
            tech_key=888, tech_list=1156)
 # Costs: wood 124 (buildings, archers, ships), stone 128 (buildings), gold 136
@@ -325,6 +329,8 @@ ANIM = dict(idle=(164, 168), walk=(124, 128), attack=(204, 208), attack2=(244, 2
 CORPSE = (308, 312)  # frame shown after death (= last death frame)
 GFX_ID = 104
 COSTS = ('food', 'wood', 'stone', 'gold', 'iron')
+ARMORS = ('shock', 'arrow', 'pierce', 'gun', 'laser', 'missile')
+SPEED_SCALE = 20  # the game shows speed 0.6 as 12
 EPOCHS = ['Prehistoric', 'Stone', 'Copper', 'Bronze', 'Dark', 'Middle', 'Renaissance', 'Imperial',
           'Industrial', 'Atomic WW1', 'Atomic WW2', 'Atomic Modern', 'Digital', 'Nano', 'Space']
 FIRST_STRING_ID = 40000  # Language.dll's own strings stop at 33005
@@ -455,7 +461,11 @@ class GameSession:
         normal graphics)."""
         o = self.objs.recs[oid]
         u = dict(id=oid, internal=name_of(o), name=self.display_name(oid), hp=i32(o, OBJ['hp']),
-                 attack=i32(o, OBJ['attack']), range=f32(o, OBJ['range']))
+                 attack=i32(o, OBJ['attack']), range=f32(o, OBJ['range']),
+                 line_of_sight=f32(o, OBJ['line_of_sight']), reload_time=f32(o, OBJ['reload_time']),
+                 speed=round(f32(o, OBJ['speed']) * SPEED_SCALE, 3))
+        for k, a in enumerate(ARMORS):
+            u['armor_' + a] = i32(o, OBJ['armor'] + 4 * k)
         t = self.tech_of(oid)
         u['trainable'] = t is not None
         if t:
@@ -638,7 +648,9 @@ class GameSession:
         self.new_strings[sid] = text
         return sid
 
-    def set_stats(self, oid, name=None, hp=None, attack=None, range=None, build_time=None, **costs):
+    def set_stats(self, oid, name=None, hp=None, attack=None, range=None, build_time=None,
+                  line_of_sight=None, reload_time=None, speed=None, armor=None, **costs):
+        """armor: {'shock': 5, ...}; speed as the game shows it (Clubman: 12)."""
         o = self.objs.recs[oid]
         if name is not None and name != (self.display_name(oid) or name_of(o)):
             sid = i32(o, OBJ['name_string'])
@@ -652,6 +664,15 @@ class GameSession:
             set_i32(o, OBJ['attack'], attack)
         if range is not None:
             set_f32(o, OBJ['range'], range)
+        if line_of_sight is not None:
+            set_f32(o, OBJ['line_of_sight'], line_of_sight)
+        if reload_time is not None:
+            set_f32(o, OBJ['reload_time'], reload_time)
+        if speed is not None:
+            set_f32(o, OBJ['speed'], speed / SPEED_SCALE)
+        for a, v in (armor or {}).items():
+            if v is not None:
+                set_i32(o, OBJ['armor'] + 4 * ARMORS.index(a), v)
         t = self.tech_of(oid)
         if t:
             for c in COSTS:

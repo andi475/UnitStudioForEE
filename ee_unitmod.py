@@ -45,7 +45,9 @@ def install():
         base_anims = s.unit(base).get('anims')
         oid, desc = s.new_unit(base, u['name'], u.get('epoch'), u.get('button_slot'), u.get('available_now', True))
         s.set_stats(oid, name=u.get('display_name'), hp=u.get('hp'), attack=u.get('attack'),
-                    range=u.get('range'), build_time=u.get('build_time'), **{c: u.get(c) for c in g.COSTS})
+                    range=u.get('range'), line_of_sight=u.get('line_of_sight'),
+                    reload_time=u.get('reload_time'), speed=u.get('speed'),
+                    armor=u.get('armor'), build_time=u.get('build_time'), **{c: u.get(c) for c in g.COSTS})
         o = s.objs.recs[oid]
         if 'icon' in u:  # any existing button texture
             p = u['icon'].encode('latin1')[:99]

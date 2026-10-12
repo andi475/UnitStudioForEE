@@ -13,7 +13,7 @@ Language.dll (*.orig); "Restore Original Game Files" puts them back.
 bl_info = {
     "name": "EE Unit Studio (Empire Earth)",
     "author": "UnitMod",
-    "version": (1, 0, 16),
+    "version": (1, 0, 17),
     "blender": (4, 2, 0),
     "location": "3D Viewport > Sidebar > Empire Earth, File > Import-Export",
     "description": "Unofficial fan-made tool: edit Empire Earth units, models and textures in the game files",
@@ -94,6 +94,21 @@ class EEUS_State(bpy.types.PropertyGroup):
     hp: IntProperty(name='Hit Points', min=1)
     attack: IntProperty(name='Attack', min=0)
     range: FloatProperty(name='Range', min=0.0, description='0.5 for melee units', precision=2)
+    line_of_sight: FloatProperty(name='Line of Sight', min=0.0, precision=1,
+                                 description='How far the unit sees (Clubman: 4)')
+    reload_time: FloatProperty(name='Reload Time', min=0.0, precision=2, unit='TIME_ABSOLUTE',
+                               description='Seconds between two attacks (Clubman: 2, Catapult: 8)')
+    speed: FloatProperty(name='Speed', min=0.0, precision=1,
+                         description='As the game shows it (Clubman: 12, Horseman: 16)')
+    armor_shock: IntProperty(name='Shock', min=0)
+    armor_arrow: IntProperty(name='Arrow', min=0)
+    armor_pierce: IntProperty(name='Pierce', min=0)
+    armor_gun: IntProperty(name='Gun', min=0)
+    armor_laser: IntProperty(name='Laser', min=0)
+    armor_missile: IntProperty(name='Missile', min=0)
+    show_armor: BoolProperty(name='Armor', default=False, description='Show the armor values')
+    show_stats: BoolProperty(name='Stats', default=False, description='Show hit points, attack, range and so on')
+    show_cost: BoolProperty(name='Cost', default=False, description='Show the cost and build time')
     food: IntProperty(name='Food', min=0)
     wood: IntProperty(name='Wood', min=0)
     stone: IntProperty(name='Stone', min=0)
@@ -105,6 +120,8 @@ class EEUS_State(bpy.types.PropertyGroup):
     attack_anim: IntVectorProperty(name='Attack', size=2, min=0, description='First and last frame')
     attack2: IntVectorProperty(name='Attack 2', size=2, min=0, description='First and last frame')
     death: IntVectorProperty(name='Death', size=2, min=0, description='First and last frame')
+    show_anims: BoolProperty(name='Animation Frames', default=False,
+                             description='Show the first and last frame of each animation')
     clear_previous: BoolProperty(name='Clear Previous Model', default=True,
                                  description='Before importing, delete the models imported earlier (only objects '
                                              'created by an import and copies of them; your own objects stay)')
@@ -178,6 +195,9 @@ def fill_edit_fields(context):
     gid = selected_look(context)
     u = s.unit(oid, gid)
     st.name, st.hp, st.attack, st.range = u['name'] or u['internal'], u['hp'], u['attack'], u['range']
+    st.line_of_sight, st.reload_time, st.speed = u['line_of_sight'], u['reload_time'], u['speed']
+    for a in gamedata.ARMORS:
+        setattr(st, 'armor_' + a, u['armor_' + a])
     for c in gamedata.COSTS:
         setattr(st, c, u.get(c, 0))
     st.build_time = u.get('build_time', 0.0)
@@ -209,6 +229,8 @@ def apply_fields(context, s, oid, base_anims=None, base_oid=None, gid=None, refe
     the unit; model and animation frames to its look gid (default: normal)."""
     st = state(context)
     s.set_stats(oid, name=st.name.strip() or None, hp=st.hp, attack=st.attack, range=st.range,
+                line_of_sight=st.line_of_sight, reload_time=st.reload_time, speed=st.speed,
+                armor={a: getattr(st, 'armor_' + a) for a in gamedata.ARMORS},
                 build_time=st.build_time, **{c: getattr(st, c) for c in gamedata.COSTS})
     if st.is_created and st.available_now != s.is_available_now(oid):
         s.set_available_now(oid, st.available_now)
@@ -227,7 +249,12 @@ def apply_fields(context, s, oid, base_anims=None, base_oid=None, gid=None, refe
         gid = s.set_model(oid, data, sst, gid=gid)
         s.set_animations(oid, anims, gid=gid)
     elif current and anims != current:
-        model, _ = cem.read_cem(s.model_files(oid, gid)[0])
+        try:
+            model, _ = cem.read_cem(s.model_files(oid, gid)[0])
+        except cem.UnsupportedModel:
+            raise gamedata.GameError(
+                'the animation frames cannot be changed alone here: this model uses a format the add-on cannot '
+                'read, so its frame count is unknown. Replace the model (Use Active Mesh as Model) to change them.')
         check_anim_frames(anims, len(model['frames']))
         s.set_animations(oid, anims, gid=gid)
     return msg
@@ -272,8 +299,14 @@ class EEUS_OT_import(_NeedsUnit, bpy.types.Operator):
         s, oid, gid = session(context), selected_oid(context), selected_look(context)
         try:
             data, tex, tex_name = s.model_files(oid, gid)
+            cem.read_cem(data)  # check the format before anything in the scene is removed
         except gamedata.GameError as e:
             self.report({'ERROR'}, str(e))
+            return {'CANCELLED'}
+        except cem.UnsupportedModel as e:
+            self.report({'ERROR'}, '%s. You can still replace it with your own model: select your mesh, tick '
+                                   '"Use Active Mesh as Model" and click Write Changes to Game.'
+                        % str(e).capitalize())
             return {'CANCELLED'}
         u = s.unit(oid, gid)
         if state(context).clear_previous:
@@ -478,6 +511,14 @@ def unit_visible(st, item):
     return all(w == '#%d' % item.oid if w.startswith('#') else w in text for w in st.search.lower().split())
 
 
+def fold(layout, st, prop, text):
+    """A clickable heading that shows or hides the fields below it; returns
+    whether they are shown."""
+    shown = getattr(st, prop)
+    layout.prop(st, prop, text=text, emboss=False, icon='DISCLOSURE_TRI_DOWN' if shown else 'DISCLOSURE_TRI_RIGHT')
+    return shown
+
+
 class EEUS_PT_panel(bpy.types.Panel):
     bl_label = 'EE Unit Studio'
     bl_space_type = 'VIEW_3D'
@@ -515,22 +556,27 @@ class EEUS_PT_panel(bpy.types.Panel):
         box = layout.box()
         box.prop(st, 'name')
         col = box.column(align=True)
-        col.prop(st, 'hp')
-        col.prop(st, 'attack')
-        col.prop(st, 'range')
+        if fold(col, st, 'show_stats', 'Stats'):
+            for prop in ('hp', 'attack', 'range', 'reload_time', 'line_of_sight', 'speed'):
+                col.prop(st, prop)
+        col = box.column(align=True)
+        if fold(col, st, 'show_armor', 'Armor'):
+            for a in gamedata.ARMORS:
+                col.prop(st, 'armor_' + a)
         if u['trainable']:
             col = box.column(align=True)
-            col.label(text='Cost')
-            for c in gamedata.COSTS:
-                col.prop(st, c)
-            box.prop(st, 'build_time')
+            if fold(col, st, 'show_cost', 'Cost and Build Time'):
+                for c in gamedata.COSTS:
+                    col.prop(st, c)
+                col.separator()
+                col.prop(st, 'build_time')
             if st.is_created:
                 box.prop(st, 'available_now')
         if 'anims' in u:
             col = box.column(align=True)
-            col.label(text='Animation Frames (first, last)')
-            for prop in ANIM_PROPS.values():
-                col.prop(st, prop)
+            if fold(col, st, 'show_anims', 'Animation Frames (first, last)'):
+                for prop in ANIM_PROPS.values():
+                    col.prop(st, prop)
         col = box.column()
         col.prop(st, 'use_mesh')
         if st.use_mesh:

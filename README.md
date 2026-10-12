@@ -18,7 +18,7 @@
 With it you can:
 
 * replace a unit's 3D model and texture with your own, made in Blender,
-* change a unit's name, hit points, attack, range, cost, build time and animation frames,
+* change a unit's name, hit points, attack, range, reload time, line of sight, speed, armor, cost, build time and animation frames,
 * create new trainable units based on existing ones,
 * import the game's models into Blender (on your own computer) as a reference for size, animation and attachment points.
 
@@ -34,7 +34,7 @@ Drag and Drop the zip file into a blender window
 or
 
 Blender → Edit → Preferences → Add-ons → ▾ menu (top right) → **Install from Disk…** → pick
-`ee_unit_studio-1.0.16.zip`. 
+`ee_unit_studio-1.0.17.zip`. 
 
 Then open the 3D Viewport sidebar (press **N**) → tab **Empire Earth**.
 
@@ -54,8 +54,9 @@ Then open the 3D Viewport sidebar (press **N**) → tab **Empire Earth**.
    (empties such as `attack`, `impact_00`). Timeline markers like `ee_walk 31-45` show which frames belong to which
    animation. With the trash-can toggle next to the button switched on, the previously imported model is deleted first
    (only objects created by an import, including copies of them; your own objects stay).
-4. Change **Name, Hit Points, Attack, Range, Cost, Build Time** or the **Animation Frames**, then click
-   **Write Changes to Game**.
+4. Change **Name, Hit Points, Attack, Range, Reload Time, Line of Sight, Speed, Armor, Cost, Build Time** or the **Animation
+   Frames**, then click **Write Changes to Game**. Speed is shown as in the game (Clubman 12). Stats, Armor, Cost and
+   Animation Frames are folded away; click their heading to open them.
 5. To give the unit your own model, tick **Use Active Mesh as Model**, select your mesh and write. The scene's frame
    range is exported (game frame 0 = the scene's start frame); keep it consistent with the animation frames.
 6. **Create New Unit** makes a new unit based on the selected one, with the values above (and the active mesh, if
@@ -115,6 +116,8 @@ py ee_unitmod.py uninstall                  # put the original game files back
 | `epoch` | 1 = Prehistoric … 15 = Space; default: the base unit's |
 | `available_now` | `true` (default): trainable as soon as its epoch is reached; `false`: together with the base unit |
 | `hp`, `attack`, `range` | stats (range is 0.5 for melee units) |
+| `reload_time`, `line_of_sight`, `speed` | e.g. `2`, `4` and `12` (the Clubman's values; reload time in seconds, speed as the game shows it) |
+| `armor` | e.g. `{"shock": 2, "arrow": 1}`; types `shock`, `arrow`, `pierce`, `gun`, `laser`, `missile` |
 | `food`, `wood`, `stone`, `gold`, `iron` | cost |
 | `build_time` | seconds |
 | `button_slot` | position in the building's panel; picked automatically if left out |
@@ -127,8 +130,9 @@ py ee_unitmod.py uninstall                  # put the original game files back
 
 * The computer players do not train new units (but replaced ones should work).
 * Multiplayer works only if every player has the same changes.
-* Armor and movement speed cannot be edited yet.
-* A few game models (version 0x30001 of the model format) cannot be imported yet.
+* 11 of the game's models use a newer format (version 0x30001) that cannot be imported yet, e.g. the Priest's
+  Digital look, the Industrial Town Center, the 88mm AA gun and the Cruiser. You can still replace them with your own
+  model, but their animation frames cannot be changed on their own and their tag points cannot be copied.
 
 ## How it works
 
@@ -136,7 +140,9 @@ Technical notes on the file formats, found by analysing the data files for compa
 
 * `Data\data.ssa` is an archive (`rass` header, sorted lower-case file table); every file inside is PKWARE-DCL
   compressed behind a `PK01` header. *The Art of Conquest* also reads the original game's archive.
-* `db\dbobjects.dat`: fixed 1960-byte records. Offsets: id 116, hp 120, range 132, attack 192, button 296, graphics 300,
+* `db\dbobjects.dat`: fixed 1960-byte records. Offsets: id 116, hp 120, range 132, line of sight 136, reload time
+  (seconds) 140, speed 148
+  (shown ×20 in the game), attack 192, armor 196–216 (shock, arrow, pierce, gun, laser, missile), button 296, graphics 300,
   name string id 472, number of tech-list entries 884, tech key 888, tech list 1156 (200 ints). The game reads only as
   many list entries as the count says.
 * `db\dbtechtree.dat`: one section per epoch with variable-length records; buildings refer to a tech by
