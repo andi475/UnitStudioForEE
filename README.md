@@ -34,7 +34,7 @@ Drag and Drop the zip file into a blender window
 or
 
 Blender → Edit → Preferences → Add-ons → ▾ menu (top right) → **Install from Disk…** → pick
-`ee_unit_studio-1.0.18.zip`. 
+`ee_unit_studio-1.0.19.zip`. 
 
 Then open the 3D Viewport sidebar (press **N**) → tab **Empire Earth**.
 
@@ -88,7 +88,16 @@ The add-on also adds File → Import / Export → **Empire Earth Model (.cem)** 
   can freeze when one is missing, so every tag point of the unit's original model that your scene lacks is copied from
   the original automatically.
 * Meshes parented directly to the main mesh are exported as **sub-models** (turrets, propellers, wheels). If there are
-  none, the original sub-models are kept.
+  none, the original sub-models are kept. A sub-model's **origin is its pivot**, and its name tells the game what to do:
+  * `orbital_cw_200_00` **spins** clockwise, `orbital_ccw_400_01` counter-clockwise, around the object's **local Z axis**
+    (propellers, rotors, radar dishes). The number in the middle is the speed: the game's planes and helicopters use
+    about 200–400. The last number just keeps the names apart.
+  * `turret_1` turns to aim.
+  * Any other name stays fixed (it still moves with its own animation).
+
+  So for a propeller: model it lying flat in its local XY plane around the origin, parent it to the main mesh, rotate
+  and move the object to where it belongs and name it e.g. `orbital_cw_300_00`. Imported game models show their
+  sub-models the same way, so you can copy them.
 * The unit's animation frames must exist in your model; writing is refused otherwise.
 * Keep it low-poly: the game's own infantry has roughly 200–400 triangles.
 
