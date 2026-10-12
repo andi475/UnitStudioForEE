@@ -815,14 +815,25 @@ class GameSession:
             set_i32(t[2], TECH['requires'], i32(bt[2], TECH['requires']) if bt else 0)
             self.copy_enablers(created[1], key)
 
+    # A panel has rows of 16 slots, filled from the bottom: 0-15, 16-31 above
+    # it, then 32-47. Fixed command buttons share the grid: the bottom row's
+    # free places (Populate and the rally point of a Town Center), the left
+    # column (a Citizen's Stop at 16) and the places listed in the command
+    # buttons' records. New buttons avoid all of them.
+    PANEL_SLOTS = [s for s in range(16, 48) if s % 16]
+    COMMAND_PANEL = 46  # BTN['slot'] of command buttons; their place is at 220
+
+    def _command_slots(self):
+        return {i32(r, 220) for r in self.btns.recs if i32(r, BTN['slot']) == self.COMMAND_PANEL}
+
     def _free_slot(self, buildings):
-        used = set()  # unit buttons sit in slots 1-15 of a building's panel
+        used = self._command_slots()
         for r in buildings:
             for k in struct.unpack_from('<200i', r, OBJ['tech_list']):
                 t = self.techs.find_key(k) if k > 0 else None
                 if t:
                     used.add(i32(self.btns.recs[i32(t[2], TECH['button'])], BTN['slot']))
-        free = [s for s in range(1, 16) if s not in used]
+        free = [s for s in self.PANEL_SLOTS if s not in used]
         if not free:
             raise GameError('no free button slot in that building')
         return free[0]

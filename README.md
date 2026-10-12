@@ -34,7 +34,7 @@ Drag and Drop the zip file into a blender window
 or
 
 Blender → Edit → Preferences → Add-ons → ▾ menu (top right) → **Install from Disk…** → pick
-`ee_unit_studio-1.0.17.zip`. 
+`ee_unit_studio-1.0.18.zip`. 
 
 Then open the 3D Viewport sidebar (press **N**) → tab **Empire Earth**.
 
@@ -120,7 +120,7 @@ py ee_unitmod.py uninstall                  # put the original game files back
 | `armor` | e.g. `{"shock": 2, "arrow": 1}`; types `shock`, `arrow`, `pierce`, `gun`, `laser`, `missile` |
 | `food`, `wood`, `stone`, `gold`, `iron` | cost |
 | `build_time` | seconds |
-| `button_slot` | position in the building's panel; picked automatically if left out |
+| `button_slot` | position in the building's panel: rows of 16 from the bottom (0–15 bottom row, 16–31 the row above, 32–47 the next); fixed buttons like Stop and Populate use the free places of the bottom row, the left column and a few more. Picked automatically if left out, avoiding all of these |
 | `model`, `texture` | your own `.cem` / `.sst` (or uncompressed `.tga`) file, path relative to this folder |
 | `animations` | e.g. `{"walk": [31, 45], "death": [46, 62]}`; slots `idle`, `walk`, `attack`, `attack2`, `death` |
 | `icon` | an existing button texture of the game, e.g. `textures\\but_maceman_03T.sst` |
@@ -148,7 +148,9 @@ Technical notes on the file formats, found by analysing the data files for compa
 * `db\dbtechtree.dat`: one section per epoch with variable-length records; buildings refer to a tech by
   key = (section + 1) × 1000 + index − 1. Costs: wood 124, stone 128, gold 136, iron 144, food 148; build time (ms) 152;
   prerequisite 156; created unit 172; button 176; event 116.
-* `db\dbbuttons.dat`: 224-byte records: name, texture, id at 204, panel slot at 216.
+* `db\dbbuttons.dat`: 224-byte records: name, texture, id at 204, panel slot at 216 (rows of 16 filled from the
+  bottom; fixed command buttons like Stop and Populate use the bottom row's free places, the left column and the
+  places stored at offset 220 of their own records).
 * `db\dbgraphics.dat`: 33 length-prefixed strings (name, model, texture, 30 extra texture slots) + 716 fixed bytes with
   the animation table.
 * `db\dbevents.dat` and `db\dbeffects.dat`: researching a tech fires its event, whose effects can enable (type 8) or
