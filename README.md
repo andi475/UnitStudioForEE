@@ -34,7 +34,7 @@ Drag and Drop the zip file into a blender window
 or
 
 Blender → Edit → Preferences → Add-ons → ▾ menu (top right) → **Install from Disk…** → pick
-`ee_unit_studio-1.0.15.zip`. 
+`ee_unit_studio-1.0.16.zip`. 
 
 Then open the 3D Viewport sidebar (press **N**) → tab **Empire Earth**.
 
@@ -46,6 +46,10 @@ Then open the 3D Viewport sidebar (press **N**) → tab **Empire Earth**.
 2. Pick a unit in the list. The **search field** above it filters as you type: every word must appear in the unit's
    name or internal name (`long bow`, `tank`, `inf10`), and `#20` finds unit number 20. **Trainable only** hides
    buildings, animals and other objects.
+   Many units and buildings change their look when a new epoch is reached (Citizen, Town Center, Capitol, House,
+   Dock, Priest, …). Each **epoch look** has its own row below the unit, e.g. *Citizen – Stone*. With such a row
+   selected, Read Model, Use Active Mesh as Model and the animation frames apply to that look; name, stats and cost
+   always belong to the whole unit. A look shared with another unit is copied first, so the other unit keeps it.
 3. **Read Model from Game** imports the unit with its texture, every animation frame (as shape keys) and its tag points
    (empties such as `attack`, `impact_00`). Timeline markers like `ee_walk 31-45` show which frames belong to which
    animation. With the trash-can toggle next to the button switched on, the previously imported model is deleted first
@@ -55,13 +59,14 @@ Then open the 3D Viewport sidebar (press **N**) → tab **Empire Earth**.
 5. To give the unit your own model, tick **Use Active Mesh as Model**, select your mesh and write. The scene's frame
    range is exported (game frame 0 = the scene's start frame); keep it consistent with the animation frames.
 6. **Create New Unit** makes a new unit based on the selected one, with the values above (and the active mesh, if
-   ticked). It gets its own button in the same buildings. **Epoch** 0 keeps the base unit's epoch.
+   ticked). It gets its own button in the same buildings. **Epoch** 0 keeps the base unit's epoch. Created from an
+   epoch-look row, the new unit has that look (it does not change its look with the epochs).
    **Available in Its Epoch** (on by default) makes it trainable as soon as that epoch is reached; switched off, it
    only becomes trainable together with its base unit (for example after the upgrade an upgrade-line unit needs). For
    units you created, the same checkbox appears among the unit's fields.
 7. **Reset Unit to Original** puts the selected unit back as it was in the original game (name, stats, cost, build
-   time, button, model, texture, animations) without touching any other unit; a building keeps the units you created
-   for it. Not available for units you created yourself.
+   time, button, model, texture, animations, all epoch looks) without touching any other unit; a building keeps the
+   units you created for it. Not available for units you created yourself.
 8. **Restore Original Game Files** undoes every change.
 
 Every write goes straight into the game files and takes a few seconds; close the game first. The first write backs
@@ -141,7 +146,8 @@ Technical notes on the file formats, found by analysing the data files for compa
 * `db\dbgraphics.dat`: 33 length-prefixed strings (name, model, texture, 30 extra texture slots) + 716 fixed bytes with
   the animation table.
 * `db\dbevents.dat` and `db\dbeffects.dat`: researching a tech fires its event, whose effects can enable (type 8) or
-  disable (type 9) other techs.
+  disable (type 9) other techs, or give a unit another graphics record (type 6: unit at offset 20, graphics at 36) –
+  that is how the epoch events change the look of citizens and buildings.
 * Unit names live in the string table of `Language.dll`; new names are added from id 40000 up.
 * The `.cem` model and `.sst` texture formats are described at the top of `ee_unit_studio\cem.py`.
 

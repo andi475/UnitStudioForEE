@@ -13,7 +13,7 @@ Language.dll (*.orig); "Restore Original Game Files" puts them back.
 bl_info = {
     "name": "EE Unit Studio (Empire Earth)",
     "author": "UnitMod",
-    "version": (1, 0, 15),
+    "version": (1, 0, 16),
     "blender": (4, 2, 0),
     "location": "3D Viewport > Sidebar > Empire Earth, File > Import-Export",
     "description": "Unofficial fan-made tool: edit Empire Earth units, models and textures in the game files",
@@ -66,6 +66,8 @@ class EEUS_Preferences(bpy.types.AddonPreferences):
 class EEUS_UnitItem(bpy.types.PropertyGroup):
     # 'name' (from PropertyGroup) holds "display name (internal name)" for the list search
     oid: IntProperty()
+    look: IntProperty()  # graphics record of an epoch look; 0 = the unit's normal look
+    look_name: StringProperty()
     label: StringProperty()
     internal: StringProperty()
     trainable: BoolProperty()
@@ -134,7 +136,21 @@ def selected_oid(context):
     return None
 
 
-def fill_list(context, select_oid=None):
+def selected_look(context):
+    """Graphics record of the selected epoch look, or None for a unit's normal look."""
+    st = state(context)
+    if 0 <= st.index < len(st.units):
+        return st.units[st.index].look or None
+    return None
+
+
+def selected_look_name(context):
+    st = state(context)
+    return st.units[st.index].look_name if 0 <= st.index < len(st.units) else ''
+
+
+def fill_list(context, select_oid=None, select_look_name=''):
+    """One row per unit, followed by one row per epoch look of that unit."""
     st, s = state(context), session(context)
     st.units.clear()
     if not s:
@@ -143,18 +159,24 @@ def fill_list(context, select_oid=None):
         u = s.unit(oid)
         if 'model' not in u and not u['trainable']:
             continue  # technical objects without a model
-        item = st.units.add()
-        item.oid, item.internal, item.trainable, item.hp = oid, u['internal'], u['trainable'], u['hp']
-        item.label = u['name'] or u['internal']
-        item.name = '%s (%s)' % (item.label, u['internal'])
-    st.index = next((i for i, it in enumerate(st.units) if it.oid == select_oid), -1)
+        rows = [(0, '')] + s.looks(oid)
+        for look, look_name in rows:
+            item = st.units.add()
+            item.oid, item.internal, item.trainable, item.hp = oid, u['internal'], u['trainable'], u['hp']
+            item.look, item.look_name = look, look_name
+            name = u['name'] or u['internal']
+            item.label = '%s – %s' % (name, look_name) if look else name
+            item.name = '%s (%s)' % (item.label, u['internal'])
+    st.index = next((i for i, it in enumerate(st.units)
+                     if it.oid == select_oid and it.look_name == select_look_name), -1)
 
 
 def fill_edit_fields(context):
     st, s, oid = state(context), session(context), selected_oid(context)
     if not s or oid is None:
         return
-    u = s.unit(oid)
+    gid = selected_look(context)
+    u = s.unit(oid, gid)
     st.name, st.hp, st.attack, st.range = u['name'] or u['internal'], u['hp'], u['attack'], u['range']
     for c in gamedata.COSTS:
         setattr(st, c, u.get(c, 0))
@@ -166,6 +188,8 @@ def fill_edit_fields(context):
     parts = ['#%d %s' % (oid, u['internal'])]
     if u['trainable']:
         parts.append('epoch %d (%s)' % (u['epoch'], gamedata.EPOCHS[u['epoch'] - 1]))
+    if gid:
+        parts.append('look: %s' % selected_look_name(context))
     st.info = ', '.join(parts)
 
 
@@ -180,14 +204,15 @@ def check_anim_frames(anims, frame_count):
             % (frame_count, frame_count - 1, ', '.join(bad)))
 
 
-def apply_fields(context, s, oid, base_anims=None, base_oid=None):
-    """Write the panel fields into the session for unit oid."""
+def apply_fields(context, s, oid, base_anims=None, base_oid=None, gid=None, reference=None):
+    """Write the panel fields into the session for unit oid. Stats belong to
+    the unit; model and animation frames to its look gid (default: normal)."""
     st = state(context)
     s.set_stats(oid, name=st.name.strip() or None, hp=st.hp, attack=st.attack, range=st.range,
                 build_time=st.build_time, **{c: getattr(st, c) for c in gamedata.COSTS})
     if st.is_created and st.available_now != s.is_available_now(oid):
         s.set_available_now(oid, st.available_now)
-    u = s.unit(oid)
+    u = s.unit(oid, gid)
     anims = {a: tuple(getattr(st, prop)) for a, prop in ANIM_PROPS.items()}
     current = base_anims or u.get('anims')
     msg = ''
@@ -196,13 +221,15 @@ def apply_fields(context, s, oid, base_anims=None, base_oid=None):
         if not obj or obj.type != 'MESH':
             raise gamedata.GameError('select the mesh to use as the model (make it the active object)')
         check_anim_frames(anims, context.scene.frame_end - context.scene.frame_start + 1)
-        data, sst, msg = cem.export_model(context, obj, st.scale, True, s.original_model(oid, base_oid))
-        s.set_model(oid, data, sst)
-        s.set_animations(oid, anims)
+        if reference is None:
+            reference = s.original_model(oid, base_oid, gid)
+        data, sst, msg = cem.export_model(context, obj, st.scale, True, reference)
+        gid = s.set_model(oid, data, sst, gid=gid)
+        s.set_animations(oid, anims, gid=gid)
     elif current and anims != current:
-        model, _ = cem.read_cem(s.model_files(oid)[0])
+        model, _ = cem.read_cem(s.model_files(oid, gid)[0])
         check_anim_frames(anims, len(model['frames']))
-        s.set_animations(oid, anims)
+        s.set_animations(oid, anims, gid=gid)
     return msg
 
 
@@ -242,16 +269,17 @@ class EEUS_OT_import(_NeedsUnit, bpy.types.Operator):
     bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context):
-        s, oid = session(context), selected_oid(context)
+        s, oid, gid = session(context), selected_oid(context), selected_look(context)
         try:
-            data, tex, tex_name = s.model_files(oid)
+            data, tex, tex_name = s.model_files(oid, gid)
         except gamedata.GameError as e:
             self.report({'ERROR'}, str(e))
             return {'CANCELLED'}
-        u = s.unit(oid)
+        u = s.unit(oid, gid)
         if state(context).clear_previous:
             cem.clear_imported()
-        root, model = cem.import_model(context, data, gamedata.slug(u['name'] or u['internal']), tex, tex_name)
+        name = (u['name'] or u['internal']) + (' ' + selected_look_name(context) if gid else '')
+        root, model = cem.import_model(context, data, gamedata.slug(name), tex, tex_name)
         markers = context.scene.timeline_markers
         for m in [m for m in markers if m.name.startswith('ee_')]:
             markers.remove(m)
@@ -273,16 +301,17 @@ class EEUS_OT_write(_NeedsUnit, bpy.types.Operator):
     bl_label = 'Write Changes to Game'
 
     def execute(self, context):
-        s, oid = session(context), selected_oid(context)
+        s, oid, gid = session(context), selected_oid(context), selected_look(context)
+        look_name = selected_look_name(context)
         t = time.time()
         try:
-            msg = apply_fields(context, s, oid)
+            msg = apply_fields(context, s, oid, gid=gid)
             s.save()
         except (gamedata.GameError, OSError, RuntimeError) as e:
             s.load()  # drop the half-applied edit
             self.report({'ERROR'}, str(e))
             return {'CANCELLED'}
-        fill_list(context, oid)
+        fill_list(context, oid, look_name)
         self.report({'INFO'}, 'Saved to game in %.1fs%s' % (time.time() - t, ('. Model: ' + msg) if msg else ''))
         return {'FINISHED'}
 
@@ -298,12 +327,17 @@ class EEUS_OT_create(_NeedsUnit, bpy.types.Operator):
         if not name:
             self.report({'ERROR'}, 'Enter a name for the new unit')
             return {'CANCELLED'}
-        base_anims = s.unit(base).get('anims')
+        look = selected_look(context)
+        base_anims = s.unit(base, look).get('anims')
         try:
             oid, desc = s.new_unit(base, name, st.new_epoch or None, available_now=st.new_available_now)
+            reference = None
+            if look:  # created from an epoch-look row: the new unit looks like that
+                gamedata.set_i32(s.objs.recs[oid], gamedata.OBJ['graphics'], look)
+                reference = s.original_model(base, gid=look)
             st.is_created = False  # the fields below still describe the base unit's settings
             st.name = name
-            msg = apply_fields(context, s, oid, base_anims, base)
+            msg = apply_fields(context, s, oid, base_anims, base, reference=reference)
             s.save()
         except (gamedata.GameError, OSError, RuntimeError) as e:
             s.load()
@@ -328,7 +362,7 @@ class EEUS_OT_reset(_NeedsUnit, bpy.types.Operator):
         return context.window_manager.invoke_confirm(self, event)
 
     def execute(self, context):
-        s, oid = session(context), selected_oid(context)
+        s, oid, look_name = session(context), selected_oid(context), selected_look_name(context)
         try:
             s.reset_unit(oid)
             s.save()
@@ -336,7 +370,7 @@ class EEUS_OT_reset(_NeedsUnit, bpy.types.Operator):
             s.load()
             self.report({'ERROR'}, str(e))
             return {'CANCELLED'}
-        fill_list(context, oid)
+        fill_list(context, oid, look_name)
         fill_edit_fields(context)
         self.report({'INFO'}, '"%s" is back to the original' % (s.unit(oid)['name'] or s.unit(oid)['internal']))
         return {'FINISHED'}
@@ -417,6 +451,10 @@ class EEUS_OT_export_file(bpy.types.Operator, ExportHelper):
 class EEUS_UL_units(bpy.types.UIList):
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
         row = layout.row(align=True)
+        if item.look:  # an epoch look of the unit in the row(s) above
+            row.label(text='', icon='BLANK1')
+            row.label(text=item.label, icon='TEXTURE')
+            return
         row.label(text=item.label, icon='COMMUNITY' if item.trainable else 'OBJECT_DATA')
         sub = row.row()
         sub.alignment = 'RIGHT'
@@ -467,6 +505,9 @@ class EEUS_PT_panel(bpy.types.Panel):
             return
         u = s.unit(oid)
         layout.label(text=st.info, icon='INFO')
+        if selected_look(context):
+            layout.label(text='Model, texture and animation frames: this look only. Stats: whole unit.',
+                         icon='TEXTURE')
         row = layout.row(align=True)
         row.operator(EEUS_OT_import.bl_idname, icon='IMPORT')
         row.prop(st, 'clear_previous', text='', icon='TRASH')
