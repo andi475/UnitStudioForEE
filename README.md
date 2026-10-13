@@ -11,6 +11,8 @@
 
 ![Unit Studio for EE in Blender](docs/screenshot1.png)
 
+![Unit Studio for EE in Blender](docs/screenshot2.png)
+
 ![Unit Studio for EE in Blender](docs/screenshot3.png)
 
 ![Unit Studio for EE in Blender](docs/screenshot4.png)
