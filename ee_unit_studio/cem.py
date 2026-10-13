@@ -18,8 +18,13 @@ CEM layout (all little-endian):
            vertices * (vec3 position, vec3 normal, f32 u, f32 v)  [v = 0 is the
            top of the texture, DirectX style; Blender uses 1 - v]
            tags * vec3 position
-           f32[16] matrix (identity), vec3 bbox min, vec3 bbox max
+           f32[16] matrix, vec3 bbox min, vec3 bbox max
   children complete CEM blocks, one after another
+  The matrix is row-major (translation in elements 3, 7, 11) and places the
+  model in its parent: identity for the main model; a sub-model's vertices are
+  stored around its own pivot. Sub-models named orbital_cw_<speed>_<n> or
+  orbital_ccw_<speed>_<n> spin around their local Z axis (propellers, rotors,
+  radar dishes), turret_<n> turn to aim.
   string = u32 length incl. terminating 0, then the bytes
 Z is up, the ground is z = 0. Animation is stored as one full vertex snapshot
 per frame.
@@ -40,13 +45,18 @@ def _wstr(s):
     b = s.encode('latin1', 'replace') + b'\0'
     return struct.pack('<I', len(b)) + b
 
+class UnsupportedModel(ValueError):
+    """A model in a format this add-on cannot read (11 of the game's models use
+    version 0x30001 instead of 2)."""
+
+
 def read_cem(d, off=0):
     """Returns (model dict, end offset)."""
     if d[off:off + 4] != b'SSMF':
         raise ValueError('not a CEM model')
     ver, ntri, nvert, ntag, nmat, nframe, nchild, nlod = struct.unpack_from('<8I', d, off + 4)
     if ver != 2:
-        raise ValueError('unsupported CEM version %#x (only version 2 is supported)' % ver)
+        raise UnsupportedModel('this model uses a newer format (version %#x) that this add-on cannot read yet' % ver)
     name, p = _rstr(d, off + 36)
     center = struct.unpack_from('<3f', d, p)
     p += 12
@@ -142,13 +152,14 @@ def global_triangles(model, lod=0):
 IDENTITY = (1.0, 0, 0, 0, 0, 1.0, 0, 0, 0, 0, 1.0, 0, 0, 0, 0, 1.0)
 
 def build_cem(tris_by_mat, mat_names, mat_textures, positions, normals, uvs, tag_names, tag_positions,
-              vertex_ranges, lods=10, mat_flags=None):
+              vertex_ranges, lods=10, mat_flags=None, name='Scene Root', matrices=None):
     """
     tris_by_mat: list (per material) of triangle lists (vertex index triples)
     positions/normals: per frame, flat float lists (3 per vertex)
     uvs: flat list (2 per vertex), shared by every frame
     tag_positions: per frame, flat float list (3 per tag)
     vertex_ranges: per material (first vertex, count)
+    matrices: per frame, 16 floats placing the model in its parent (sub-models)
     """
     nvert = len(uvs) // 2
     nframe = len(positions)
@@ -157,7 +168,7 @@ def build_cem(tris_by_mat, mat_names, mat_textures, positions, normals, uvs, tag
     center = ((min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2, (min(zs) + max(zs)) / 2)
     out = bytearray(b'SSMF')
     out += struct.pack('<8I', 2, len(tris), nvert, len(tag_names), len(tris_by_mat), nframe, 0, lods)
-    out += _wstr('Scene Root') + struct.pack('<3f', *center)
+    out += _wstr(name) + struct.pack('<3f', *center)
     flat = [i for t in tris for i in t]
     for _ in range(lods):  # every LOD gets the full mesh
         out += struct.pack('<I', len(tris)) + struct.pack('<%dI' % len(flat), *flat)
@@ -181,7 +192,7 @@ def build_cem(tris_by_mat, mat_names, mat_textures, positions, normals, uvs, tag
                       uvs[2 * i], uvs[2 * i + 1]))
         out += v.tobytes()
         out += struct.pack('<%df' % len(tag_positions[f]), *tag_positions[f])
-        out += struct.pack('<16f', *IDENTITY)
+        out += struct.pack('<16f', *(matrices[f] if matrices else IDENTITY))
         out += struct.pack('<6f', min(xs), min(ys), min(zs), max(xs), max(ys), max(zs))
     return bytes(out)
 
@@ -376,10 +387,27 @@ if bpy:
         images = _load_images(texture, texture_name or (name + 't.sst')) if texture else []
         root = _build_object(context, model, name, images)
         for i, child in enumerate(model['children']):
-            _build_object(context, child, '%s_part%d' % (name, i + 1), images).parent = root
+            # keep the game's name: orbital_cw_200_00 spins, turret_1 aims...
+            cname = child['name'] if child['name'] not in ('', 'Scene Root') else '%s_part%d' % (name, i + 1)
+            obj = _build_object(context, child, cname, images)
+            obj.parent = root
+            obj['ee_sub_model'] = i  # export keeps the original order
+            _place(obj, [fr['matrix'] for fr in child['frames']])
         context.scene.frame_start, context.scene.frame_end = 0, len(model['frames']) - 1
         context.scene.frame_set(0)
         return root, model
+
+    def _place(obj, matrices):
+        """Put a sub-model where its matrix says (animated if it changes)."""
+        mats = [Matrix([m[0:4], m[4:8], m[8:12], m[12:16]]) for m in matrices]
+        obj.matrix_basis = mats[0]
+        if any(m != mats[0] for m in mats[1:]):
+            for k, m in enumerate(mats):
+                obj.matrix_basis = m
+                for path in ('location', 'rotation_euler', 'scale'):
+                    obj.keyframe_insert(path, frame=k)
+            obj.animation_data.action[IMPORT_TAG] = True
+            obj.matrix_basis = mats[0]
 
     def import_file(context, path, texture_path=''):
         tex = texture_path or _find_texture(path)
@@ -420,8 +448,11 @@ if bpy:
     class _Part:
         """One exported model (the main mesh or a child mesh), sampled per frame."""
 
-        def __init__(self, obj, images):
+        def __init__(self, obj, images, sub_model=False):
             self.obj, self.tags = obj, _tag_empties(obj)
+            # a sub-model keeps its vertices around its own origin (the pivot it
+            # spins or turns around) and stores its placement as a matrix
+            self.sub_model, self.matrices = sub_model, []
             self.slot_group = []
             for s in obj.material_slots:
                 img = _image_of(s.material)
@@ -437,6 +468,12 @@ if bpy:
             mesh = ev.to_mesh()
             try:
                 mw = ev.matrix_world
+                if self.sub_model:
+                    m = [c for row in mw for c in row]
+                    m[3], m[7], m[11] = m[3] * scale, m[7] * scale, m[11] * scale
+                    self.matrices.append(m)
+                    to_local = mw.inverted_safe()
+                    mw = Matrix.Identity(4)
                 nm = mw.to_3x3().inverted_safe().transposed()
                 mesh.calc_loop_triangles()
                 cn = _corner_normals(mesh)
@@ -453,7 +490,8 @@ if bpy:
                 self.normals.append(N)
                 T = array('f')
                 for t in self.tags:
-                    T.extend(t.matrix_world.translation * scale)
+                    T.extend((to_local @ t.matrix_world.translation if self.sub_model
+                              else t.matrix_world.translation) * scale)
                 self.tag_positions.append(T)
             finally:
                 ev.to_mesh_clear()
@@ -539,7 +577,9 @@ if bpy:
                              self.positions, self.normals, self.uv_flat, names, tag_pos, self.ranges,
                              mat_flags=[i for i, _ in self.mat_keys],
                              # same number of detail levels as the model it replaces (some have 1)
-                             lods=min(10, max(1, len(reference['lods']))) if reference else 10)
+                             lods=min(10, max(1, len(reference['lods']))) if reference else 10,
+                             name=self.obj.name.split('.')[0] if self.sub_model else 'Scene Root',
+                             matrices=self.matrices if self.sub_model else None)
             from_ref = [n for n in (reference or {}).get('tags', []) if n not in {t.name.split('.')[0] for t in self.tags}]
             return data, names, auto, from_ref
 
@@ -550,8 +590,12 @@ if bpy:
         Returns (cem bytes, sst bytes or None, message)."""
         scene = context.scene
         frames = list(range(scene.frame_start, scene.frame_end + 1))
-        ref = read_cem(reference)[0] if reference else None
-        child_objs = sorted((c for c in obj.children if c.type == 'MESH'), key=lambda c: c.name)
+        try:
+            ref, unreadable_ref = (read_cem(reference)[0] if reference else None), False
+        except UnsupportedModel:  # the original's tag points and sub-models cannot be copied
+            ref, unreadable_ref = None, True
+        child_objs = sorted((c for c in obj.children if c.type == 'MESH'),
+                            key=lambda c: (c.get('ee_sub_model', 1 << 30), c.name))
 
         images = []
         for o in [obj] + child_objs:
@@ -559,7 +603,7 @@ if bpy:
                 img = _image_of(s.material)
                 if img and img not in images:
                     images.append(img)
-        parts = [_Part(o, images) for o in [obj] + child_objs]
+        parts = [_Part(obj, images)] + [_Part(o, images, sub_model=True) for o in child_objs]
 
         depsgraph = context.evaluated_depsgraph_get()
         current = scene.frame_current
@@ -578,6 +622,8 @@ if bpy:
             msg += ' (placed automatically; add empties as children of the mesh to control them)'
         if from_ref:
             msg += ' (taken from the original model: %s)' % ', '.join(from_ref)
+        if unreadable_ref:
+            msg += ' (the original model uses a format that cannot be read, so its tag points could not be copied)'
         ref_children = ref['children'] if ref else []
         if len(parts) > 1:
             kids = [p.build(images, ref_children[i] if i < len(ref_children) else None)[0]

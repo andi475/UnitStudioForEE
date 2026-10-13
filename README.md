@@ -20,7 +20,7 @@
 With it you can:
 
 * replace a unit's 3D model and texture with your own, made in Blender,
-* change a unit's name, hit points, attack, range, cost, build time and animation frames,
+* change a unit's name, hit points, attack, range, reload time, line of sight, speed, armor, cost, build time and animation frames,
 * create new trainable units based on existing ones,
 * import the game's models into Blender (on your own computer) as a reference for size, animation and attachment points.
 
@@ -36,7 +36,7 @@ Drag and Drop the zip file into a blender window
 or
 
 Blender → Edit → Preferences → Add-ons → ▾ menu (top right) → **Install from Disk…** → pick
-`ee_unit_studio-1.0.15.zip`. 
+`ee_unit_studio-1.0.19.zip`. 
 
 Then open the 3D Viewport sidebar (press **N**) → tab **Empire Earth**.
 
@@ -48,22 +48,28 @@ Then open the 3D Viewport sidebar (press **N**) → tab **Empire Earth**.
 2. Pick a unit in the list. The **search field** above it filters as you type: every word must appear in the unit's
    name or internal name (`long bow`, `tank`, `inf10`), and `#20` finds unit number 20. **Trainable only** hides
    buildings, animals and other objects.
+   Many units and buildings change their look when a new epoch is reached (Citizen, Town Center, Capitol, House,
+   Dock, Priest, …). Each **epoch look** has its own row below the unit, e.g. *Citizen – Stone*. With such a row
+   selected, Read Model, Use Active Mesh as Model and the animation frames apply to that look; name, stats and cost
+   always belong to the whole unit. A look shared with another unit is copied first, so the other unit keeps it.
 3. **Read Model from Game** imports the unit with its texture, every animation frame (as shape keys) and its tag points
    (empties such as `attack`, `impact_00`). Timeline markers like `ee_walk 31-45` show which frames belong to which
    animation. With the trash-can toggle next to the button switched on, the previously imported model is deleted first
    (only objects created by an import, including copies of them; your own objects stay).
-4. Change **Name, Hit Points, Attack, Range, Cost, Build Time** or the **Animation Frames**, then click
-   **Write Changes to Game**.
+4. Change **Name, Hit Points, Attack, Range, Reload Time, Line of Sight, Speed, Armor, Cost, Build Time** or the **Animation
+   Frames**, then click **Write Changes to Game**. Speed is shown as in the game (Clubman 12). Stats, Armor, Cost and
+   Animation Frames are folded away; click their heading to open them.
 5. To give the unit your own model, tick **Use Active Mesh as Model**, select your mesh and write. The scene's frame
    range is exported (game frame 0 = the scene's start frame); keep it consistent with the animation frames.
 6. **Create New Unit** makes a new unit based on the selected one, with the values above (and the active mesh, if
-   ticked). It gets its own button in the same buildings. **Epoch** 0 keeps the base unit's epoch.
+   ticked). It gets its own button in the same buildings. **Epoch** 0 keeps the base unit's epoch. Created from an
+   epoch-look row, the new unit has that look (it does not change its look with the epochs).
    **Available in Its Epoch** (on by default) makes it trainable as soon as that epoch is reached; switched off, it
    only becomes trainable together with its base unit (for example after the upgrade an upgrade-line unit needs). For
    units you created, the same checkbox appears among the unit's fields.
 7. **Reset Unit to Original** puts the selected unit back as it was in the original game (name, stats, cost, build
-   time, button, model, texture, animations) without touching any other unit; a building keeps the units you created
-   for it. Not available for units you created yourself.
+   time, button, model, texture, animations, all epoch looks) without touching any other unit; a building keeps the
+   units you created for it. Not available for units you created yourself.
 8. **Restore Original Game Files** undoes every change.
 
 Every write goes straight into the game files and takes a few seconds; close the game first. The first write backs
@@ -84,7 +90,16 @@ The add-on also adds File → Import / Export → **Empire Earth Model (.cem)** 
   can freeze when one is missing, so every tag point of the unit's original model that your scene lacks is copied from
   the original automatically.
 * Meshes parented directly to the main mesh are exported as **sub-models** (turrets, propellers, wheels). If there are
-  none, the original sub-models are kept.
+  none, the original sub-models are kept. A sub-model's **origin is its pivot**, and its name tells the game what to do:
+  * `orbital_cw_200_00` **spins** clockwise, `orbital_ccw_400_01` counter-clockwise, around the object's **local Z axis**
+    (propellers, rotors, radar dishes). The number in the middle is the speed: the game's planes and helicopters use
+    about 200–400. The last number just keeps the names apart.
+  * `turret_1` turns to aim.
+  * Any other name stays fixed (it still moves with its own animation).
+
+  So for a propeller: model it lying flat in its local XY plane around the origin, parent it to the main mesh, rotate
+  and move the object to where it belongs and name it e.g. `orbital_cw_300_00`. Imported game models show their
+  sub-models the same way, so you can copy them.
 * The unit's animation frames must exist in your model; writing is refused otherwise.
 * Keep it low-poly: the game's own infantry has roughly 200–400 triangles.
 
@@ -112,9 +127,11 @@ py ee_unitmod.py uninstall                  # put the original game files back
 | `epoch` | 1 = Prehistoric … 15 = Space; default: the base unit's |
 | `available_now` | `true` (default): trainable as soon as its epoch is reached; `false`: together with the base unit |
 | `hp`, `attack`, `range` | stats (range is 0.5 for melee units) |
+| `reload_time`, `line_of_sight`, `speed` | e.g. `2`, `4` and `12` (the Clubman's values; reload time in seconds, speed as the game shows it) |
+| `armor` | e.g. `{"shock": 2, "arrow": 1}`; types `shock`, `arrow`, `pierce`, `gun`, `laser`, `missile` |
 | `food`, `wood`, `stone`, `gold`, `iron` | cost |
 | `build_time` | seconds |
-| `button_slot` | position in the building's panel; picked automatically if left out |
+| `button_slot` | position in the building's panel: rows of 16 from the bottom (0–15 bottom row, 16–31 the row above, 32–47 the next); fixed buttons like Stop and Populate use the free places of the bottom row, the left column and a few more. Picked automatically if left out, avoiding all of these |
 | `model`, `texture` | your own `.cem` / `.sst` (or uncompressed `.tga`) file, path relative to this folder |
 | `animations` | e.g. `{"walk": [31, 45], "death": [46, 62]}`; slots `idle`, `walk`, `attack`, `attack2`, `death` |
 | `icon` | an existing button texture of the game, e.g. `textures\\but_maceman_03T.sst` |
@@ -124,8 +141,9 @@ py ee_unitmod.py uninstall                  # put the original game files back
 
 * The computer players do not train new units (but replaced ones should work).
 * Multiplayer works only if every player has the same changes.
-* Armor and movement speed cannot be edited yet.
-* A few game models (version 0x30001 of the model format) cannot be imported yet.
+* 11 of the game's models use a newer format (version 0x30001) that cannot be imported yet, e.g. the Priest's
+  Digital look, the Industrial Town Center, the 88mm AA gun and the Cruiser. You can still replace them with your own
+  model, but their animation frames cannot be changed on their own and their tag points cannot be copied.
 
 ## How it works
 
@@ -133,17 +151,22 @@ Technical notes on the file formats, found by analysing the data files for compa
 
 * `Data\data.ssa` is an archive (`rass` header, sorted lower-case file table); every file inside is PKWARE-DCL
   compressed behind a `PK01` header. *The Art of Conquest* also reads the original game's archive.
-* `db\dbobjects.dat`: fixed 1960-byte records. Offsets: id 116, hp 120, range 132, attack 192, button 296, graphics 300,
+* `db\dbobjects.dat`: fixed 1960-byte records. Offsets: id 116, hp 120, range 132, line of sight 136, reload time
+  (seconds) 140, speed 148
+  (shown ×20 in the game), attack 192, armor 196–216 (shock, arrow, pierce, gun, laser, missile), button 296, graphics 300,
   name string id 472, number of tech-list entries 884, tech key 888, tech list 1156 (200 ints). The game reads only as
   many list entries as the count says.
 * `db\dbtechtree.dat`: one section per epoch with variable-length records; buildings refer to a tech by
   key = (section + 1) × 1000 + index − 1. Costs: wood 124, stone 128, gold 136, iron 144, food 148; build time (ms) 152;
   prerequisite 156; created unit 172; button 176; event 116.
-* `db\dbbuttons.dat`: 224-byte records: name, texture, id at 204, panel slot at 216.
+* `db\dbbuttons.dat`: 224-byte records: name, texture, id at 204, panel slot at 216 (rows of 16 filled from the
+  bottom; fixed command buttons like Stop and Populate use the bottom row's free places, the left column and the
+  places stored at offset 220 of their own records).
 * `db\dbgraphics.dat`: 33 length-prefixed strings (name, model, texture, 30 extra texture slots) + 716 fixed bytes with
   the animation table.
 * `db\dbevents.dat` and `db\dbeffects.dat`: researching a tech fires its event, whose effects can enable (type 8) or
-  disable (type 9) other techs.
+  disable (type 9) other techs, or give a unit another graphics record (type 6: unit at offset 20, graphics at 36) –
+  that is how the epoch events change the look of citizens and buildings.
 * Unit names live in the string table of `Language.dll`; new names are added from id 40000 up.
 * The `.cem` model and `.sst` texture formats are described at the top of `ee_unit_studio\cem.py`.
 

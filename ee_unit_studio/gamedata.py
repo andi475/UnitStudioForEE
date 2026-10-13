@@ -307,11 +307,16 @@ class EventTable:
             out += head + struct.pack('<I%di' % len(effects), len(effects), *effects)
         return bytes(out)
 
-EFFECT = dict(id=0, index=4, type=32, key=40)
+EFFECT = dict(id=0, index=4, object=20, type=32, graphics=36, key=40)
 ENABLE_TECH = 8
+SET_GRAPHICS = 6  # give the object at 20 the graphics record at 36 (epoch looks)
 
 # Field offsets, identified by comparing known units.
-OBJ = dict(id=116, hp=120, range=132, attack=192, button=296, graphics=300, name_string=472,
+OBJ = dict(id=116, hp=120, range=132, line_of_sight=136,
+           reload_time=140,  # seconds between attacks
+           speed=148, attack=192,
+           armor=196,  # 6 ints in the order of ARMORS
+           button=296, graphics=300, name_string=472,
            tech_count=884,  # how many entries of tech_list the game reads
            tech_key=888, tech_list=1156)
 # Costs: wood 124 (buildings, archers, ships), stone 128 (buildings), gold 136
@@ -324,6 +329,8 @@ ANIM = dict(idle=(164, 168), walk=(124, 128), attack=(204, 208), attack2=(244, 2
 CORPSE = (308, 312)  # frame shown after death (= last death frame)
 GFX_ID = 104
 COSTS = ('food', 'wood', 'stone', 'gold', 'iron')
+ARMORS = ('shock', 'arrow', 'pierce', 'gun', 'laser', 'missile')
+SPEED_SCALE = 20  # the game shows speed 0.6 as 12
 EPOCHS = ['Prehistoric', 'Stone', 'Copper', 'Bronze', 'Dark', 'Middle', 'Renaissance', 'Imperial',
           'Industrial', 'Atomic WW1', 'Atomic WW2', 'Atomic Modern', 'Digital', 'Nano', 'Space']
 FIRST_STRING_ID = 40000  # Language.dll's own strings stop at 33005
@@ -449,10 +456,16 @@ class GameSession:
         return self.new_strings.get(i32(self.objs.recs[oid], OBJ['name_string'])) or \
             self.strings.get(i32(self.objs.recs[oid], OBJ['name_string']), '')
 
-    def unit(self, oid):
+    def unit(self, oid, gid=None):
+        """Unit data; model, texture and animations of look gid (default: its
+        normal graphics)."""
         o = self.objs.recs[oid]
         u = dict(id=oid, internal=name_of(o), name=self.display_name(oid), hp=i32(o, OBJ['hp']),
-                 attack=i32(o, OBJ['attack']), range=f32(o, OBJ['range']))
+                 attack=i32(o, OBJ['attack']), range=f32(o, OBJ['range']),
+                 line_of_sight=f32(o, OBJ['line_of_sight']), reload_time=f32(o, OBJ['reload_time']),
+                 speed=round(f32(o, OBJ['speed']) * SPEED_SCALE, 3))
+        for k, a in enumerate(ARMORS):
+            u['armor_' + a] = i32(o, OBJ['armor'] + 4 * k)
         t = self.tech_of(oid)
         u['trainable'] = t is not None
         if t:
@@ -460,18 +473,50 @@ class GameSession:
                 u[c] = i32(t[2], TECH[c])
             u['build_time'] = i32(t[2], TECH['build_ms']) / 1000.0
             u['epoch'] = t[0] + 1
-        g = self.graphics_of(oid)
+        g = self.graphics_of(oid, gid)
         if g:
             strs, fixed = g
             u['model'], u['texture'] = strs[1], strs[2]
             u['anims'] = {a: (i32(fixed, x), i32(fixed, y)) for a, (x, y) in ANIM.items()}
         return u
 
-    def graphics_of(self, oid):
-        gid = i32(self.objs.recs[oid], OBJ['graphics'])
+    def graphics_of(self, oid, gid=None):
+        gid = i32(self.objs.recs[oid], OBJ['graphics']) if gid is None else gid
         if 0 < gid < len(self.gfx.recs) and self.gfx.recs[gid][0][1]:
             return self.gfx.recs[gid]
         return None
+
+    def _set_graphics_effects(self, oid=None):
+        """[(effect index, object, graphics record)] of the effects that give
+        an object other graphics (mostly in the epoch events)."""
+        out = []
+        for i, r in enumerate(self.effects.recs):
+            if i and i32(r, EFFECT['index']) == i and i32(r, EFFECT['type']) == SET_GRAPHICS:
+                o = i32(r, EFFECT['object'])
+                if oid is None or o == oid:
+                    out.append((i, o, i32(r, EFFECT['graphics'])))
+        return out
+
+    def looks(self, oid):
+        """The unit's other looks, usually one per epoch: [(graphics record,
+        label)], e.g. the Citizen's 'Stone', 'Bronze', ... Stats stay shared."""
+        event_of = {}
+        for head, effects in self.events.recs:
+            for e in effects:
+                event_of.setdefault(e, bytes(head[:100]).split(b'\0')[0].decode('latin1'))
+        base = i32(self.objs.recs[oid], OBJ['graphics'])
+        found = {}
+        for i, _, gid in self._set_graphics_effects(oid):
+            if gid != base and gid not in found and self.graphics_of(oid, gid):
+                label = event_of.get(i, '') or self.gfx.recs[gid][0][0]
+                found[gid] = label[6:] if label.startswith('Epoch ') else label
+        order = lambda label: next((k for k, e in enumerate(EPOCHS) if label.startswith(e.split()[0])), 99)
+        return sorted(found.items(), key=lambda kv: (order(kv[1]), kv[1]))
+
+    def graphics_users(self, gid):
+        """Objects that use a graphics record, directly or through an effect."""
+        users = {i for i in self.unit_ids() if i32(self.objs.recs[i], OBJ['graphics']) == gid}
+        return users | {o for _, o, g in self._set_graphics_effects() if g == gid}
 
     def game_file(self, name):
         name = name.lower()
@@ -482,9 +527,10 @@ class GameSession:
                 return unpack_file(arc.read(name))
         return None
 
-    def model_files(self, oid):
-        """(cem bytes, texture bytes or None, texture file name) of a unit."""
-        g = self.graphics_of(oid)
+    def model_files(self, oid, gid=None):
+        """(cem bytes, texture bytes or None, texture file name) of a unit (or
+        of one of its looks)."""
+        g = self.graphics_of(oid, gid)
         if not g:
             raise GameError('this object has no 3D model')
         cem = self.game_file(g[0][1] + '.cem')
@@ -498,17 +544,28 @@ class GameSession:
                 return cem, data, os.path.basename(name)
         return cem, None, os.path.basename(tex)
 
-    def original_model(self, oid, base_oid=None):
+    def original_model(self, oid, base_oid=None, gid=None):
         """The unit's model as shipped with the game (from the *.orig backup),
         so a replaced model can keep the original tag points and sub-models even
-        after earlier edits. New units use their base unit's. None if unknown."""
+        after earlier edits. New units use their base unit's; for a look (gid),
+        the model that look had originally. None if unknown."""
         orig = self.ssa + '.orig'
         try:
             arc = Archive(orig) if os.path.exists(orig) else self.aoc
             objs = FixedTable(unpack_file(arc.read(DB['objs'])), OBJ_SIZE)
             gfx = GraphicsTable(unpack_file(arc.read(DB['gfx'])))
+            effects = EffectTable(unpack_file(arc.read(DB['effects'])))
         except (OSError, ValueError, KeyError):
             return None
+        # a look: the effect that gives it sits at the same index in the backup
+        for i, _, g in self._set_graphics_effects(oid):
+            if g == gid and i < len(effects.recs):
+                orig_gid = i32(effects.recs[i], EFFECT['graphics'])
+                if 0 < orig_gid < len(gfx.recs) and gfx.recs[orig_gid][0][1]:
+                    name = (gfx.recs[orig_gid][0][1] + '.cem').lower()
+                    for a in (arc, self.base):
+                        if a and name in a.entries:
+                            return unpack_file(a.read(name))
         if base_oid is None and not (0 < oid < len(objs.recs) and i32(objs.recs[oid], OBJ['id']) == oid):
             base_oid = self._guess_base(oid, objs)
         for i in (oid, base_oid):
@@ -542,7 +599,8 @@ class GameSession:
                 raise GameError('the backup of the original game files (data.ssa.orig) was not found')
             data = unpack_file(Archive(orig).read(DB[key]))
             cache[key] = {'objs': lambda: FixedTable(data, OBJ_SIZE), 'btns': lambda: FixedTable(data, BTN_SIZE),
-                          'techs': lambda: TechTree(data), 'gfx': lambda: GraphicsTable(data)}[key]()
+                          'techs': lambda: TechTree(data), 'gfx': lambda: GraphicsTable(data),
+                          'effects': lambda: EffectTable(data)}[key]()
         return cache[key]
 
     def reset_unit(self, oid):
@@ -552,13 +610,18 @@ class GameSession:
         of trainable techs, so units created since stay trainable there."""
         if self.created_base(oid):
             raise GameError('this unit was created with the add-on, so there is no original to go back to')
-        oobjs, otechs, obtns, ogfx = (self._orig_table(k) for k in ('objs', 'techs', 'btns', 'gfx'))
+        oobjs, otechs, obtns, ogfx, oeffects = (self._orig_table(k)
+                                                for k in ('objs', 'techs', 'btns', 'gfx', 'effects'))
         cur = self.objs.recs[oid]
         rec = bytearray(oobjs.recs[oid])
         for off, size in ((OBJ['tech_count'], 4), (OBJ['tech_list'], 800)):
             rec[off:off + size] = cur[off:off + size]
-        cur_gid = i32(cur, OBJ['graphics'])
+        # graphics records the unit uses now (normal look and epoch looks)
+        cur_gids = {i32(cur, OBJ['graphics'])} | {g for _, _, g in self._set_graphics_effects(oid)}
         self.objs.recs[oid] = rec
+        # its epoch-look effects point at their original graphics again
+        for i, _, _ in self._set_graphics_effects(oid):
+            self.effects.recs[i] = bytearray(oeffects.recs[i])
 
         key = i32(rec, OBJ['tech_key'])
         orig_tech, cur_tech = otechs.find_key(key), self.techs.find_key(key)
@@ -569,13 +632,14 @@ class GameSession:
             self.btns.recs[bid] = bytearray(obtns.recs[bid])
         restore_gfx = lambda gid: self.gfx.recs.__setitem__(
             gid, [list(ogfx.recs[gid][0]), bytearray(ogfx.recs[gid][1])])
-        gid = i32(rec, OBJ['graphics'])
-        if 0 < gid < len(ogfx.recs):
-            restore_gfx(gid)
-        # a graphics copy made in a free slot (the record was shared): free it again
-        if cur_gid != gid and 0 < cur_gid < len(ogfx.recs) and not any(
-                i32(self.objs.recs[i], OBJ['graphics']) == cur_gid for i in self.unit_ids()):
-            restore_gfx(cur_gid)
+        orig_gids = {i32(rec, OBJ['graphics'])} | {g for _, _, g in self._set_graphics_effects(oid)}
+        for gid in orig_gids:
+            if 0 < gid < len(ogfx.recs):
+                restore_gfx(gid)
+        # copies made in free slots (the record was shared): free them again
+        for gid in cur_gids - orig_gids:
+            if 0 < gid < len(ogfx.recs) and not ogfx.recs[gid][0][0] and not self.graphics_users(gid):
+                restore_gfx(gid)
 
     # ------------------------------------------------------------ editing
     def _new_string(self, text):
@@ -584,7 +648,9 @@ class GameSession:
         self.new_strings[sid] = text
         return sid
 
-    def set_stats(self, oid, name=None, hp=None, attack=None, range=None, build_time=None, **costs):
+    def set_stats(self, oid, name=None, hp=None, attack=None, range=None, build_time=None,
+                  line_of_sight=None, reload_time=None, speed=None, armor=None, **costs):
+        """armor: {'shock': 5, ...}; speed as the game shows it (Clubman: 12)."""
         o = self.objs.recs[oid]
         if name is not None and name != (self.display_name(oid) or name_of(o)):
             sid = i32(o, OBJ['name_string'])
@@ -598,6 +664,15 @@ class GameSession:
             set_i32(o, OBJ['attack'], attack)
         if range is not None:
             set_f32(o, OBJ['range'], range)
+        if line_of_sight is not None:
+            set_f32(o, OBJ['line_of_sight'], line_of_sight)
+        if reload_time is not None:
+            set_f32(o, OBJ['reload_time'], reload_time)
+        if speed is not None:
+            set_f32(o, OBJ['speed'], speed / SPEED_SCALE)
+        for a, v in (armor or {}).items():
+            if v is not None:
+                set_i32(o, OBJ['armor'] + 4 * ARMORS.index(a), v)
         t = self.tech_of(oid)
         if t:
             for c in COSTS:
@@ -740,26 +815,41 @@ class GameSession:
             set_i32(t[2], TECH['requires'], i32(bt[2], TECH['requires']) if bt else 0)
             self.copy_enablers(created[1], key)
 
+    # A panel has rows of 16 slots, filled from the bottom: 0-15, 16-31 above
+    # it, then 32-47. Fixed command buttons share the grid: the bottom row's
+    # free places (Populate and the rally point of a Town Center), the left
+    # column (a Citizen's Stop at 16) and the places listed in the command
+    # buttons' records. New buttons avoid all of them.
+    PANEL_SLOTS = [s for s in range(16, 48) if s % 16]
+    COMMAND_PANEL = 46  # BTN['slot'] of command buttons; their place is at 220
+
+    def _command_slots(self):
+        return {i32(r, 220) for r in self.btns.recs if i32(r, BTN['slot']) == self.COMMAND_PANEL}
+
     def _free_slot(self, buildings):
-        used = set()  # unit buttons sit in slots 1-15 of a building's panel
+        used = self._command_slots()
         for r in buildings:
             for k in struct.unpack_from('<200i', r, OBJ['tech_list']):
                 t = self.techs.find_key(k) if k > 0 else None
                 if t:
                     used.add(i32(self.btns.recs[i32(t[2], TECH['button'])], BTN['slot']))
-        free = [s for s in range(1, 16) if s not in used]
+        free = [s for s in self.PANEL_SLOTS if s not in used]
         if not free:
             raise GameError('no free button slot in that building')
         return free[0]
 
-    def _own_graphics(self, oid):
-        """Graphics record used only by this unit. A record no other unit uses is
-        edited in place (keeps the unit as close to the original as possible);
-        a shared one is cloned into a free slot first."""
+    def _own_graphics(self, oid, gid=None):
+        """Graphics record (the unit's normal look, or look gid) used only by
+        this unit. A record nothing else uses is edited in place (keeps the
+        unit as close to the original as possible); a shared one - by other
+        units or by their epoch looks - is cloned into a free slot first and
+        only this unit is pointed at the copy."""
         o = self.objs.recs[oid]
-        gid = i32(o, OBJ['graphics'])
-        users = sum(1 for i in self.unit_ids() if i32(self.objs.recs[i], OBJ['graphics']) == gid)
-        if users == 1:
+        base = i32(o, OBJ['graphics'])
+        gid = base if gid is None else gid
+        if gid != base and gid not in {g for _, _, g in self._set_graphics_effects(oid)}:
+            raise GameError('that look does not belong to this unit (reload the unit list)')
+        if self.graphics_users(gid) == {oid}:
             return gid
         try:
             new = next(i for i, (s, _) in enumerate(self.gfx.recs) if i > 0 and not s[0])
@@ -770,11 +860,16 @@ class GameSession:
         set_name(fixed, name_of(o)[:MAX_GFX_NAME])
         set_i32(fixed, GFX_ID, new)
         self.gfx.recs[new] = [s, fixed]
-        set_i32(o, OBJ['graphics'], new)
+        if gid == base:
+            set_i32(o, OBJ['graphics'], new)
+        for i, _, g in self._set_graphics_effects(oid):
+            if g == gid:
+                set_i32(self.effects.recs[i], EFFECT['graphics'], new)
         return new
 
-    def set_animations(self, oid, anims):
-        gid = self._own_graphics(oid)
+    def set_animations(self, oid, anims, gid=None):
+        """Returns the graphics record that was changed (a copy if gid was shared)."""
+        gid = self._own_graphics(oid, gid)
         fixed = self.gfx.recs[gid][1]
         for a, (first, last) in anims.items():
             set_i32(fixed, ANIM[a][0], first)
@@ -782,9 +877,11 @@ class GameSession:
             if a == 'death':
                 set_i32(fixed, CORPSE[0], last)
                 set_i32(fixed, CORPSE[1], last)
+        return gid
 
-    def set_model(self, oid, cem=None, sst=None):
-        gid = self._own_graphics(oid)
+    def set_model(self, oid, cem=None, sst=None, gid=None):
+        """Returns the graphics record that was changed (a copy if gid was shared)."""
+        gid = self._own_graphics(oid, gid)
         strs = self.gfx.recs[gid][0]
         if cem is not None:
             if cem[:4] != b'SSMF':
@@ -794,6 +891,7 @@ class GameSession:
         if sst is not None:
             strs[2] = custom_texture_path(gid)
             self.new_files[strs[2]] = pack_file(sst)
+        return gid
 
     def _drop_unused_custom_files(self, blobs):
         """Remove custom models/textures no graphics record uses any more (e.g.
