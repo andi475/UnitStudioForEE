@@ -880,6 +880,97 @@ class GameSession:
             raise GameError('no free button slot in that building')
         return free[0]
 
+    # ------------------------------------------------------------ building panels
+    def buildings(self):
+        """Objects with a tech list (buildings, and Citizens for the buildings they build)."""
+        return [oid for oid in self.unit_ids()
+                if any(k > 0 for k in struct.unpack_from('<200i', self.objs.recs[oid], OBJ['tech_list']))]
+
+    def tech_info(self, key):
+        """What a tech key puts on a panel: dict(key, slot, label, unit, epoch,
+        button), or None. unit is the object it trains/builds (-1 for research)."""
+        t = self.techs.find_key(key)
+        if not t:
+            return None
+        sec, _, rec = t
+        bid, obj = i32(rec, TECH['button']), i32(rec, TECH['object'])
+        if not 0 <= bid < len(self.btns.recs):
+            return None
+        is_obj = 0 < obj < len(self.objs.recs) and i32(self.objs.recs[obj], OBJ['id']) == obj
+        label = (self.display_name(obj) or name_of(self.objs.recs[obj]).strip()) if is_obj else ''
+        return dict(key=key, slot=i32(self.btns.recs[bid], BTN['slot']), button=bid, unit=obj if is_obj else -1,
+                    section=sec,
+                    label=label or name_of(self.btns.recs[bid]).strip() or name_of(rec).strip(),
+                    epoch=EPOCHS[sec] if sec < len(EPOCHS) else str(sec + 1))
+
+    def panel_of(self, building):
+        """[tech info] of everything on a building's panel (slots 0-47)."""
+        r = self.objs.recs[building]
+        out = []
+        for k in struct.unpack_from('<200i', r, OBJ['tech_list']):
+            info = self.tech_info(k) if k > 0 else None
+            if info and 0 <= info['slot'] < 48:
+                out.append(info)
+        return out
+
+    def free_slots(self, building):
+        """Slots of the building's panel that a new button can use safely."""
+        used = self._command_slots() | {i['slot'] for i in self.panel_of(building)}
+        return [s for s in self.PANEL_SLOTS if s not in used]
+
+    def set_panels(self, panels, epochs=None):
+        """panels: {building: {tech key: slot}} - everything that should be on
+        the panel of each building (slots 0-47; entries outside that range, like
+        hidden buttons, are kept). epochs: {building: epoch sections} limits
+        removing to the buttons of those epochs (the others are kept). Adds/removes techs from the buildings' lists
+        (and the techs' own lists of buildings) and moves buttons to their
+        slot. A button is shared by all buildings, so one tech must have the
+        same slot everywhere. Returns a list of change descriptions."""
+        slot_of, by_button = {}, {}
+        for b, techs in panels.items():
+            for k, slot in techs.items():
+                if slot_of.setdefault(k, slot) != slot:
+                    raise GameError('"%s" is linked to different slots (%d and %d); a button has the same slot in '
+                                    'every building' % (self.tech_info(k)['label'], slot_of[k], slot))
+                bid = self.tech_info(k)['button']
+                other = by_button.setdefault(bid, (k, slot))
+                if other[1] != slot:
+                    raise GameError('"%s" and "%s" share one button, so they need the same slot'
+                                    % (self.tech_info(other[0])['label'], self.tech_info(k)['label']))
+        changes = []
+        for b, techs in panels.items():
+            r = self.objs.recs[b]
+            old = [k for k in struct.unpack_from('<200i', r, OBJ['tech_list']) if k != -1]
+            scope = (epochs or {}).get(b)
+            shown = {i['key'] for i in self.panel_of(b) if scope is None or i['section'] in scope}
+            new = [k for k in old if k not in shown or k in techs] + [k for k in techs if k not in old]
+            if len(new) > 200:
+                raise GameError('"%s" would have more than 200 buttons' % name_of(r).strip())
+            for k in set(new) - set(old):
+                self._tech_buildings(k, add=b)
+                changes.append('%s now at %s' % (self.tech_info(k)['label'], name_of(r).strip()))
+            for k in set(old) - set(new):
+                self._tech_buildings(k, remove=b)
+                changes.append('%s removed from %s' % (self.tech_info(k)['label'], name_of(r).strip()))
+            struct.pack_into('<200i', r, OBJ['tech_list'], *(new + [-1] * (200 - len(new))))
+        for k, slot in slot_of.items():
+            info = self.tech_info(k)
+            if info['slot'] != slot:
+                set_i32(self.btns.recs[info['button']], BTN['slot'], slot)
+                changes.append('%s moved to slot %d' % (info['label'], slot))
+        return changes
+
+    def _tech_buildings(self, key, add=None, remove=None):
+        """Keep the list of buildings at the end of a tech record in step."""
+        sec, idx, rec = self.techs.find_key(key)
+        ids = [i32(rec, 272 + 4 * i) for i in range(i32(rec, 268))]
+        if add is not None and add not in ids:
+            ids.append(add)
+        if remove is not None and remove in ids:
+            ids.remove(remove)
+        new = bytearray(rec[:268]) + struct.pack('<I', len(ids)) + struct.pack('<%di' % len(ids), *ids)
+        self.techs.secs[sec][idx] = new
+
     def _own_graphics(self, oid, gid=None):
         """Graphics record (the unit's normal look, or look gid) used only by
         this unit. A record nothing else uses is edited in place (keeps the

@@ -13,7 +13,7 @@ Language.dll (*.orig); "Restore Original Game Files" puts them back.
 bl_info = {
     "name": "EE Unit Studio (Empire Earth)",
     "author": "UnitMod",
-    "version": (1, 0, 20),
+    "version": (1, 1, 0),
     "blender": (4, 2, 0),
     "location": "3D Viewport > Sidebar > Empire Earth, File > Import-Export",
     "description": "Unofficial fan-made tool: edit Empire Earth units, models and textures in the game files",
@@ -28,7 +28,7 @@ from bpy.props import (BoolProperty, CollectionProperty, FloatProperty, IntPrope
                        PointerProperty, StringProperty)
 from bpy_extras.io_utils import ExportHelper, ImportHelper
 
-from . import cem, gamedata
+from . import cem, gamedata, nodes
 
 _session = None  # gamedata.GameSession of the loaded game folder
 HAS_PLACEHOLDER = 'placeholder' in bpy.types.UILayout.bl_rna.functions['prop'].parameters.keys()
@@ -634,9 +634,11 @@ def register():
     bpy.types.Scene.ee_unit_studio = PointerProperty(type=EEUS_State)
     bpy.types.TOPBAR_MT_file_import.append(_menu_import)
     bpy.types.TOPBAR_MT_file_export.append(_menu_export)
+    nodes.register()
 
 
 def unregister():
+    nodes.unregister()
     bpy.types.TOPBAR_MT_file_import.remove(_menu_import)
     bpy.types.TOPBAR_MT_file_export.remove(_menu_export)
     del bpy.types.Scene.ee_unit_studio
