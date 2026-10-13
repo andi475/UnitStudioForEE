@@ -13,7 +13,7 @@ Language.dll (*.orig); "Restore Original Game Files" puts them back.
 bl_info = {
     "name": "EE Unit Studio (Empire Earth)",
     "author": "UnitMod",
-    "version": (1, 0, 19),
+    "version": (1, 0, 20),
     "blender": (4, 2, 0),
     "location": "3D Viewport > Sidebar > Empire Earth, File > Import-Export",
     "description": "Unofficial fan-made tool: edit Empire Earth units, models and textures in the game files",
@@ -72,6 +72,8 @@ class EEUS_UnitItem(bpy.types.PropertyGroup):
     internal: StringProperty()
     trainable: BoolProperty()
     hp: IntProperty()
+    modified: StringProperty()  # the unit's state: '', 'changed' or 'created'
+    look_changed: BoolProperty()  # this epoch look's model/texture/animations differ
 
 
 ANIMS = list(gamedata.ANIM)
@@ -89,6 +91,8 @@ class EEUS_State(bpy.types.PropertyGroup):
                                        '(game name, internal name or #number)')
     only_trainable: BoolProperty(name='Trainable only', default=True,
                                  description='Only list units that a building can train')
+    only_modified: BoolProperty(name='Modified only', default=False,
+                                description='Only list units you changed or created')
     # fields of the selected unit
     name: StringProperty(name='Name', description='Name shown in the game')
     hp: IntProperty(name='Hit Points', min=1)
@@ -172,6 +176,7 @@ def fill_list(context, select_oid=None, select_look_name=''):
     st.units.clear()
     if not s:
         return
+    modified, changed_gfx = s.modified()
     for oid in s.unit_ids():
         u = s.unit(oid)
         if 'model' not in u and not u['trainable']:
@@ -181,6 +186,7 @@ def fill_list(context, select_oid=None, select_look_name=''):
             item = st.units.add()
             item.oid, item.internal, item.trainable, item.hp = oid, u['internal'], u['trainable'], u['hp']
             item.look, item.look_name = look, look_name
+            item.modified, item.look_changed = modified.get(oid, ''), look in changed_gfx
             name = u['name'] or u['internal']
             item.label = '%s – %s' % (name, look_name) if look else name
             item.name = '%s (%s)' % (item.label, u['internal'])
@@ -487,11 +493,15 @@ class EEUS_UL_units(bpy.types.UIList):
         if item.look:  # an epoch look of the unit in the row(s) above
             row.label(text='', icon='BLANK1')
             row.label(text=item.label, icon='TEXTURE')
+            if item.look_changed:
+                row.label(text='', icon='MODIFIER')
             return
         row.label(text=item.label, icon='COMMUNITY' if item.trainable else 'OBJECT_DATA')
         sub = row.row()
         sub.alignment = 'RIGHT'
         sub.label(text='%d HP' % item.hp)
+        if item.modified:  # changed: wrench, created with the add-on: plus
+            sub.label(text='', icon='ADD' if item.modified == 'created' else 'MODIFIER')
 
     def filter_items(self, context, data, propname):
         items = getattr(data, propname)
@@ -504,8 +514,11 @@ class EEUS_UL_units(bpy.types.UIList):
 
 
 def unit_visible(st, item):
-    """Panel filters: 'Trainable only' and the search words (all must match)."""
+    """Panel filters: 'Trainable only', 'Modified only' and the search words
+    (all must match)."""
     if st.only_trainable and not item.trainable:
+        return False
+    if st.only_modified and not item.modified:
         return False
     text = item.name.lower()
     return all(w == '#%d' % item.oid if w.startswith('#') else w in text for w in st.search.lower().split())
@@ -536,6 +549,7 @@ class EEUS_PT_panel(bpy.types.Panel):
         layout.prop(st, 'search', text='', icon='VIEWZOOM', **extra)
         row = layout.row()
         row.prop(st, 'only_trainable')
+        row.prop(st, 'only_modified')
         sub = row.row()
         sub.alignment = 'RIGHT'
         sub.label(text='%d of %d' % (sum(unit_visible(st, it) for it in st.units), len(st.units)))

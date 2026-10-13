@@ -603,6 +603,48 @@ class GameSession:
                           'effects': lambda: EffectTable(data)}[key]()
         return cache[key]
 
+    def modified(self):
+        """What differs from the original game files: ({unit: 'created' or
+        'changed'}, {graphics records that changed}). Compares what Reset Unit
+        to Original puts back; a building's list of trainable units is not
+        counted, so adding a new unit to a building does not mark the building."""
+        if not os.path.exists(self.ssa + '.orig'):
+            return {}, set()
+        oobjs, otechs, obtns, ogfx, oeffects = (self._orig_table(k)
+                                                for k in ('objs', 'techs', 'btns', 'gfx', 'effects'))
+        skip = [(OBJ['tech_count'], OBJ['tech_count'] + 4), (OBJ['tech_list'], OBJ['tech_list'] + 800)]
+        def obj_bytes(r):
+            r = bytearray(r)
+            for a, b in skip:
+                r[a:b] = bytes(b - a)
+            return r
+        gfx_changed = {gid for gid, rec in enumerate(self.gfx.recs) if gid >= len(ogfx.recs)
+                       or rec[0] != list(ogfx.recs[gid][0]) or rec[1] != ogfx.recs[gid][1]}
+        look_of, repointed = {}, set()
+        for i, o, gid in self._set_graphics_effects():
+            look_of.setdefault(o, set()).add(gid)
+            if i >= len(oeffects.recs) or self.effects.recs[i] != oeffects.recs[i]:
+                repointed.add(o)  # an epoch look was pointed at another record
+        out = {}
+        for oid in self.unit_ids():
+            if oid >= len(oobjs.recs) or i32(oobjs.recs[oid], OBJ['id']) != oid:
+                out[oid] = 'created'
+                continue
+            cur, orig = self.objs.recs[oid], oobjs.recs[oid]
+            changed = obj_bytes(cur) != obj_bytes(orig)
+            if not changed:
+                t, ot = self.techs.find_key(i32(cur, OBJ['tech_key'])), otechs.find_key(i32(orig, OBJ['tech_key']))
+                changed = bool(t and ot and t[2] != ot[2])
+            if not changed:
+                bid = i32(cur, OBJ['button'])
+                changed = 0 <= bid < min(len(self.btns.recs), len(obtns.recs)) and self.btns.recs[bid] != obtns.recs[bid]
+            if not changed:
+                gids = {i32(cur, OBJ['graphics'])} | look_of.get(oid, set())
+                changed = oid in repointed or bool(gids & gfx_changed)
+            if changed:
+                out[oid] = 'changed'
+        return out, gfx_changed
+
     def reset_unit(self, oid):
         """Put one of the game's own units back as shipped: unit record (name,
         stats), tech record (cost, build time, availability), button, graphics

@@ -34,7 +34,7 @@ Drag and Drop the zip file into a blender window
 or
 
 Blender → Edit → Preferences → Add-ons → ▾ menu (top right) → **Install from Disk…** → pick
-`ee_unit_studio-1.0.19.zip`. 
+`ee_unit_studio-1.0.20.zip`. 
 
 Then open the 3D Viewport sidebar (press **N**) → tab **Empire Earth**.
 
@@ -45,7 +45,8 @@ Then open the 3D Viewport sidebar (press **N**) → tab **Empire Earth**.
    stored there); if yours is somewhere else, set **Base Game Folder** in the add-on preferences.
 2. Pick a unit in the list. The **search field** above it filters as you type: every word must appear in the unit's
    name or internal name (`long bow`, `tank`, `inf10`), and `#20` finds unit number 20. **Trainable only** hides
-   buildings, animals and other objects.
+   buildings, animals and other objects. Units you changed are marked with a wrench, units you created with a
+   plus (epoch looks with a changed model get a wrench too); **Modified only** lists just those.
    Many units and buildings change their look when a new epoch is reached (Citizen, Town Center, Capitol, House,
    Dock, Priest, …). Each **epoch look** has its own row below the unit, e.g. *Citizen – Stone*. With such a row
    selected, Read Model, Use Active Mesh as Model and the animation frames apply to that look; name, stats and cost
