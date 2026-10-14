@@ -13,7 +13,7 @@ Language.dll (*.orig); "Restore Original Game Files" puts them back.
 bl_info = {
     "name": "EE Unit Studio (Empire Earth)",
     "author": "UnitMod",
-    "version": (1, 1, 0),
+    "version": (1, 1, 1),
     "blender": (4, 2, 0),
     "location": "3D Viewport > Sidebar > Empire Earth, File > Import-Export",
     "description": "Unofficial fan-made tool: edit Empire Earth units, models and textures in the game files",
@@ -541,8 +541,9 @@ class EEUS_PT_panel(bpy.types.Panel):
     def draw(self, context):
         layout, st, p, s = self.layout, state(context), prefs(context), session(context)
         layout.prop(p, 'game_dir', text='')
-        layout.operator(EEUS_OT_load.bl_idname, icon='FILE_REFRESH',
-                        text='Reload Units' if s else 'Load Units')
+        row = layout.row(align=True)
+        row.operator(EEUS_OT_load.bl_idname, icon='FILE_REFRESH', text='Reload Units' if s else 'Load Units')
+        row.operator(nodes.EEUS_OT_switch_editor.bl_idname, text='Building Panels', icon='NODETREE').target = 'NODES'
         if not s:
             return
         extra = {'placeholder': 'Search units'} if HAS_PLACEHOLDER else {}

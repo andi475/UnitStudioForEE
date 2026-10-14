@@ -36,7 +36,7 @@ Drag and Drop the zip file into a blender window
 or
 
 Blender → Edit → Preferences → Add-ons → ▾ menu (top right) → **Install from Disk…** → pick
-`ee_unit_studio-1.1.0.zip`. 
+`ee_unit_studio-1.1.1.zip`. 
 
 Then open the 3D Viewport sidebar (press **N**) → tab **Empire Earth**.
 
@@ -84,16 +84,20 @@ Which building trains which unit, and where its button sits, can be edited with 
 **EE Building Panels** (the editor-type menu, next to Shader and Geometry Nodes), load the units in the 3D Viewport
 first, then open the sidebar (**N**) → tab **Empire Earth**:
 
-* **Add Building** adds a building (or the Citizen, for the buildings it builds) as **one node per epoch**, e.g.
-  *Barracks · Stone*, *Barracks · Copper*, each with the buttons that epoch adds. The inputs are the button slots:
-  *Bottom · 1–16* is the bottom row of the in-game panel, *Row 2* and *Row 3* the rows above. Grey slots marked
-  *free* are empty in every epoch and safe to use; slots of fixed buttons like Stop or Populate are left out. **Other
-  Epochs** also shows the slots used in other epochs (with their names), e.g. to give a unit the slot of the one it
-  replaces, like the game's upgrade lines.
-* Each button is a node on the left, labelled with its epoch (brown ones are research). **Add Unit** adds any
-  trainable unit; **Add Epoch** adds a missing epoch to the selected building.
-* **Link** a unit to a slot of its own epoch's node: the building trains it there. **Remove the link**: it no longer
-  does. **Move the link** to another slot: the button moves.
+* **Add Building** adds **one epoch of a building** (or of the Citizen, for the buildings it builds): search e.g.
+  *Barracks · Stone*. The node shows every button available in that epoch: the ones the epoch adds and those of
+  earlier epochs that are still available (every tech has a first and a last epoch; the Clubman, for example, is
+  available from Prehistoric to Renaissance). The inputs are the button slots: *Bottom · 1–16* is the bottom row of
+  the in-game panel, *Row 2* and *Row 3* the rows above. Grey slots marked *free* are empty in every epoch and safe
+  to use; slots of fixed buttons like Stop or Populate are left out. **Other Epochs** also shows the slots used only
+  in other epochs (with their names), e.g. to give a unit the slot of the one it replaces.
+* Each button is a node on the left, labelled with its first epoch (brown ones are research). **Add Unit** adds any
+  trainable unit; **Add Epoch** adds another epoch of the selected building (also one it has no buttons in yet).
+* **Link** a unit to a slot: the building trains it there. Linked into a later epoch than its last one, it stays
+  available until that epoch. **Move the link** to another slot: the button moves.
+* **Remove the link** in the node of the unit's first epoch: the building no longer has it at all. Remove it in a
+  later epoch's node: it is no longer available from that epoch on (in every building; also remove it from the
+  epochs after that, as a unit cannot come back later).
 * A button has one slot in every building that has it, so a unit linked to two buildings must use the same slot in
   both (Write refuses otherwise).
 * **Write to Game** applies the links (only for the epochs that have a node; deleting a node changes nothing);

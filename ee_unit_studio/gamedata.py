@@ -899,7 +899,7 @@ class GameSession:
         is_obj = 0 < obj < len(self.objs.recs) and i32(self.objs.recs[obj], OBJ['id']) == obj
         label = (self.display_name(obj) or name_of(self.objs.recs[obj]).strip()) if is_obj else ''
         return dict(key=key, slot=i32(self.btns.recs[bid], BTN['slot']), button=bid, unit=obj if is_obj else -1,
-                    section=sec,
+                    section=sec, first=i32(rec, TECH['first_epoch']), last=i32(rec, TECH['last_epoch']),
                     label=label or name_of(self.btns.recs[bid]).strip() or name_of(rec).strip(),
                     epoch=EPOCHS[sec] if sec < len(EPOCHS) else str(sec + 1))
 
@@ -918,14 +918,14 @@ class GameSession:
         used = self._command_slots() | {i['slot'] for i in self.panel_of(building)}
         return [s for s in self.PANEL_SLOTS if s not in used]
 
-    def set_panels(self, panels, epochs=None):
-        """panels: {building: {tech key: slot}} - everything that should be on
-        the panel of each building (slots 0-47; entries outside that range, like
-        hidden buttons, are kept). epochs: {building: epoch sections} limits
-        removing to the buttons of those epochs (the others are kept). Adds/removes techs from the buildings' lists
-        (and the techs' own lists of buildings) and moves buttons to their
-        slot. A button is shared by all buildings, so one tech must have the
-        same slot everywhere. Returns a list of change descriptions."""
+    def set_panels(self, panels, removals=None, lasts=None):
+        """panels: {building: {tech key: slot}} - buttons to have (added if
+        missing) and their slot; removals: {building: tech keys} to take off;
+        everything else on a building's list stays. lasts: {tech key: last
+        epoch} in which the tech is available (it disappears after it). Keeps
+        the techs' own lists of buildings in step. A button is shared by all
+        buildings, so one tech must have the same slot everywhere. Returns a
+        list of change descriptions."""
         slot_of, by_button = {}, {}
         for b, techs in panels.items():
             for k, slot in techs.items():
@@ -937,13 +937,11 @@ class GameSession:
                 if other[1] != slot:
                     raise GameError('"%s" and "%s" share one button, so they need the same slot'
                                     % (self.tech_info(other[0])['label'], self.tech_info(k)['label']))
-        changes = []
-        for b, techs in panels.items():
-            r = self.objs.recs[b]
+        changes, removals = [], removals or {}
+        for b in set(panels) | set(removals):
+            techs, r = panels.get(b, {}), self.objs.recs[b]
             old = [k for k in struct.unpack_from('<200i', r, OBJ['tech_list']) if k != -1]
-            scope = (epochs or {}).get(b)
-            shown = {i['key'] for i in self.panel_of(b) if scope is None or i['section'] in scope}
-            new = [k for k in old if k not in shown or k in techs] + [k for k in techs if k not in old]
+            new = [k for k in old if k not in removals.get(b, ())] + [k for k in techs if k not in old]
             if len(new) > 200:
                 raise GameError('"%s" would have more than 200 buttons' % name_of(r).strip())
             for k in set(new) - set(old):
@@ -958,6 +956,12 @@ class GameSession:
             if info['slot'] != slot:
                 set_i32(self.btns.recs[info['button']], BTN['slot'], slot)
                 changes.append('%s moved to slot %d' % (info['label'], slot))
+        for k, last in (lasts or {}).items():
+            info = self.tech_info(k)
+            if info['last'] != last:
+                set_i32(self.techs.find_key(k)[2], TECH['last_epoch'], last)
+                changes.append('%s available until %s' % (info['label'], EPOCHS[last] if last < len(EPOCHS)
+                                                          else 'the end'))
         return changes
 
     def _tech_buildings(self, key, add=None, remove=None):
