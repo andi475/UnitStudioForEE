@@ -211,10 +211,11 @@ def available(info, epoch):
 def collect_panels(tree, s):
     """What Write to Game changes, from the links of every building node:
     ({building: {tech key: slot}}, {building: tech keys to remove},
-    {tech key: last epoch}). Only epochs that have a node are looked at:
-    a unit unlinked in the node of its first epoch is taken off the building;
-    unlinked in a later node, it stops being available from that epoch on;
-    linked into a later node than its last epoch, it stays available longer."""
+    {building: {tech key: last epoch}}). Only epochs that have a node are
+    looked at: a unit unlinked in the node of its first epoch is taken off the
+    building; unlinked in a later node, it stops being available there from
+    that epoch on; linked into a later node than its last epoch, it stays
+    available longer there."""
     panels, removals, lasts = {}, {}, {}
     nodes_of = {}
     for n in tree.nodes:
@@ -234,7 +235,7 @@ def collect_panels(tree, s):
                                                  % (src.label.split(' · ')[0], epoch_name(src.section), n.label))
                     linked.setdefault(src.key, {})[epoch] = sock.slot
         game = {i['key']: i for i in s.panel_of(b)}
-        techs, gone = panels.setdefault(b, {}), removals.setdefault(b, set())
+        techs, gone, ends = panels.setdefault(b, {}), removals.setdefault(b, set()), lasts.setdefault(b, {})
         for k in set(game) | set(linked):
             info = game.get(k) or s.tech_info(k)
             name = info['label']
@@ -266,8 +267,7 @@ def collect_panels(tree, s):
                 elif max(where) > info['last']:
                     last = max(where)
             if last is not None:
-                if lasts.setdefault(k, last) != last:
-                    raise gamedata.GameError('"%s" would end in different epochs in two buildings' % name)
+                ends[k] = last
     return panels, removals, lasts
 
 
@@ -528,7 +528,7 @@ class EEUS_PT_nodes(bpy.types.Panel):
         box = layout.box().column(align=True)
         for line in ('A building node shows one epoch,', 'with the units of earlier epochs', 'still available in it.',
                      'Link a unit to a slot: trained', 'there. Remove the link in its own', 'epoch: off the building; in a',
-                     'later epoch: gone from that', 'epoch on. A button has one slot', 'in every building. Brown nodes',
+                     'later epoch: gone there from that', 'epoch on. A button has one slot', 'in every building. Brown nodes',
                      'are research.'):
             box.label(text=line)
 
@@ -547,13 +547,41 @@ classes = (EEUS_PanelTree, EEUS_SlotSocket, EEUS_ButtonSocket, EEUS_BuildingNode
            EEUS_OT_node_write, EEUS_PT_nodes)
 
 
+_tab_set = set()  # sidebars already switched to the Empire Earth tab once
+
+
+def _open_on_our_tab():
+    """Show the Empire Earth tab in the sidebar of every building panel editor,
+    once per editor (the user can pick another tab afterwards). Blender only
+    accepts the tab after the sidebar has been drawn, so this keeps checking."""
+    try:
+        for win in bpy.context.window_manager.windows:
+            for area in win.screen.areas:
+                if area.type != 'NODE_EDITOR' or getattr(area.spaces.active, 'tree_type', '') != TREE:
+                    continue
+                for region in area.regions:
+                    if region.type == 'UI' and region.as_pointer() not in _tab_set:
+                        try:
+                            region.active_panel_category = EEUS_PT_nodes.bl_category
+                        except (AttributeError, TypeError, ValueError):
+                            continue  # not drawn yet
+                        _tab_set.add(region.as_pointer())
+                        area.tag_redraw()
+    except (AttributeError, ReferenceError):
+        pass
+    return 0.5
+
+
 def register():
     for c in classes:
         bpy.utils.register_class(c)
     bpy.types.NODE_MT_add.append(_menu_add)
+    bpy.app.timers.register(_open_on_our_tab, first_interval=1.0, persistent=True)
 
 
 def unregister():
+    if bpy.app.timers.is_registered(_open_on_our_tab):
+        bpy.app.timers.unregister(_open_on_our_tab)
     bpy.types.NODE_MT_add.remove(_menu_add)
     for c in reversed(classes):
         bpy.utils.unregister_class(c)

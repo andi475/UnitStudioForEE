@@ -308,7 +308,7 @@ class EventTable:
         return bytes(out)
 
 EFFECT = dict(id=0, index=4, object=20, type=32, graphics=36, key=40)
-ENABLE_TECH = 8
+ENABLE_TECH, DISABLE_TECH = 8, 9
 SET_GRAPHICS = 6  # give the object at 20 the graphics record at 36 (epoch looks)
 
 # Field offsets, identified by comparing known units.
@@ -783,17 +783,18 @@ class GameSession:
                     if enabled else '; trainable whenever the base unit is')
         return oid, f'button slot {slot}, trained at: {where}{when}'
 
-    def copy_enablers(self, base_key, new_key):
+    def copy_enablers(self, base_key, new_key, types=(ENABLE_TECH,)):
         """Many units (all of an upgrade line) are not trainable until an event
         - reaching an epoch, researching an upgrade - enables their tech. Give
         the new tech a copy of every effect that enables the base unit's tech,
         in the same events, so both become trainable at the same moment. (The
         effects that later disable the base unit are not copied: the new unit
-        stays trainable.) Returns the number of effects added."""
+        stays trainable.) types=(ENABLE_TECH, DISABLE_TECH) copies both, for
+        an exact copy of a tech. Returns the number of effects added."""
         recs = self.effects.recs
         used = lambda i: i32(recs[i], EFFECT['index']) == i and i > 0
         def enablers(k):
-            return [i for i in range(len(recs)) if used(i) and i32(recs[i], EFFECT['type']) == ENABLE_TECH
+            return [i for i in range(len(recs)) if used(i) and i32(recs[i], EFFECT['type']) in types
                     and i32(recs[i], EFFECT['key']) == k]
         if enablers(new_key):
             return 0
@@ -921,11 +922,12 @@ class GameSession:
     def set_panels(self, panels, removals=None, lasts=None):
         """panels: {building: {tech key: slot}} - buttons to have (added if
         missing) and their slot; removals: {building: tech keys} to take off;
-        everything else on a building's list stays. lasts: {tech key: last
-        epoch} in which the tech is available (it disappears after it). Keeps
-        the techs' own lists of buildings in step. A button is shared by all
-        buildings, so one tech must have the same slot everywhere. Returns a
-        list of change descriptions."""
+        everything else on a building's list stays. lasts: {building: {tech
+        key: last epoch}} in which the tech is available there (it disappears
+        after it); a tech other buildings have too is first copied for this
+        building, so they keep theirs. Keeps the techs' own lists of buildings
+        in step. A button is shared by all buildings, so one tech must have the
+        same slot everywhere. Returns a list of change descriptions."""
         slot_of, by_button = {}, {}
         for b, techs in panels.items():
             for k, slot in techs.items():
@@ -956,13 +958,43 @@ class GameSession:
             if info['slot'] != slot:
                 set_i32(self.btns.recs[info['button']], BTN['slot'], slot)
                 changes.append('%s moved to slot %d' % (info['label'], slot))
-        for k, last in (lasts or {}).items():
-            info = self.tech_info(k)
-            if info['last'] != last:
+        for b, techs in (lasts or {}).items():
+            bname = name_of(self.objs.recs[b]).strip()
+            for k, last in techs.items():
+                info = self.tech_info(k)
+                if info['last'] == last:
+                    continue
+                until = EPOCHS[last] if last < len(EPOCHS) else 'the end'
+                if any(b2 != b and k in struct.unpack_from('<200i', r, OBJ['tech_list'])
+                       for b2, r in enumerate(self.objs.recs) if b2 and i32(r, OBJ['id']) == b2):
+                    k = self._own_tech(k, b)
+                    changes.append('%s at %s: own copy, available until %s' % (info['label'], bname, until))
+                else:
+                    changes.append('%s available until %s' % (info['label'], until))
                 set_i32(self.techs.find_key(k)[2], TECH['last_epoch'], last)
-                changes.append('%s available until %s' % (info['label'], EPOCHS[last] if last < len(EPOCHS)
-                                                          else 'the end'))
         return changes
+
+    def _own_tech(self, key, building):
+        """Give one building its own copy of a tech that other buildings have
+        too (same unit, button, cost and the same enabling/disabling events), so
+        it can be changed for that building alone. Returns the copy's key."""
+        sec, _, rec = self.techs.find_key(key)
+        try:
+            idx = next(i for i, r in enumerate(self.techs.secs[sec]) if i > 0 and i32(r, TECH['id']) == -1)
+        except StopIteration:
+            raise GameError('no free slot left in the game tables')
+        new_key = TechTree.key(sec, idx)
+        t = bytearray(rec[:268]) + struct.pack('<Ii', 1, building)
+        set_i32(t, TECH['id'], max(i32(r, TECH['id']) for s in self.techs.secs for r in s) + 1)
+        set_i32(t, TECH['key'], new_key)
+        self.techs.secs[sec][idx] = t
+        self.copy_enablers(key, new_key, types=(ENABLE_TECH, DISABLE_TECH))
+        r = self.objs.recs[building]
+        lst = list(struct.unpack_from('<200i', r, OBJ['tech_list']))
+        lst[lst.index(key)] = new_key
+        struct.pack_into('<200i', r, OBJ['tech_list'], *lst)
+        self._tech_buildings(key, remove=building)
+        return new_key
 
     def _tech_buildings(self, key, add=None, remove=None):
         """Keep the list of buildings at the end of a tech record in step."""

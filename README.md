@@ -36,7 +36,7 @@ Drag and Drop the zip file into a blender window
 or
 
 Blender → Edit → Preferences → Add-ons → ▾ menu (top right) → **Install from Disk…** → pick
-`ee_unit_studio-1.1.1.zip`. 
+`ee_unit_studio-1.1.2.zip`. 
 
 Then open the 3D Viewport sidebar (press **N**) → tab **Empire Earth**.
 
@@ -60,7 +60,8 @@ Then open the 3D Viewport sidebar (press **N**) → tab **Empire Earth**.
 4. Change **Name, Hit Points, Attack, Range, Reload Time, Line of Sight, Speed, Armor, Cost, Build Time** or the **Animation
    Frames**, then click **Write Changes to Game**. Speed is shown as in the game (Clubman 12). Stats, Armor, Cost and
    Animation Frames are folded away; click their heading to open them.
-5. To give the unit your own model, tick **Use Active Mesh as Model**, select your mesh and write. The scene's frame
+5. To give the unit your own model, select your mesh and write: **Use Active Mesh as Model** is ticked by default
+   (untick it to change only names, stats or animation frames without a mesh selected). The scene's frame
    range is exported (game frame 0 = the scene's start frame); keep it consistent with the animation frames.
 6. **Create New Unit** makes a new unit based on the selected one, with the values above (and the active mesh, if
    ticked). It gets its own button in the same buildings. **Epoch** 0 keeps the base unit's epoch. Created from an
@@ -94,10 +95,11 @@ first, then open the sidebar (**N**) → tab **Empire Earth**:
 * Each button is a node on the left, labelled with its first epoch (brown ones are research). **Add Unit** adds any
   trainable unit; **Add Epoch** adds another epoch of the selected building (also one it has no buttons in yet).
 * **Link** a unit to a slot: the building trains it there. Linked into a later epoch than its last one, it stays
-  available until that epoch. **Move the link** to another slot: the button moves.
+  available there until that epoch. **Move the link** to another slot: the button moves.
 * **Remove the link** in the node of the unit's first epoch: the building no longer has it at all. Remove it in a
-  later epoch's node: it is no longer available from that epoch on (in every building; also remove it from the
-  epochs after that, as a unit cannot come back later).
+  later epoch's node: it is no longer available there from that epoch on (also remove it from the epochs after
+  that, as a unit cannot come back later). If other buildings have the same unit, this building first gets its own
+  copy of it (same unit, button and upgrade events), so the others keep theirs.
 * A button has one slot in every building that has it, so a unit linked to two buildings must use the same slot in
   both (Write refuses otherwise).
 * **Write to Game** applies the links (only for the epochs that have a node; deleting a node changes nothing);

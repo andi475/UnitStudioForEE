@@ -13,7 +13,7 @@ Language.dll (*.orig); "Restore Original Game Files" puts them back.
 bl_info = {
     "name": "EE Unit Studio (Empire Earth)",
     "author": "UnitMod",
-    "version": (1, 1, 1),
+    "version": (1, 1, 2),
     "blender": (4, 2, 0),
     "location": "3D Viewport > Sidebar > Empire Earth, File > Import-Export",
     "description": "Unofficial fan-made tool: edit Empire Earth units, models and textures in the game files",
@@ -129,7 +129,7 @@ class EEUS_State(bpy.types.PropertyGroup):
     clear_previous: BoolProperty(name='Clear Previous Model', default=True,
                                  description='Before importing, delete the models imported earlier (only objects '
                                              'created by an import and copies of them; your own objects stay)')
-    use_mesh: BoolProperty(name='Use Active Mesh as Model', default=False,
+    use_mesh: BoolProperty(name='Use Active Mesh as Model', default=True,
                            description='Export the active mesh (scene frame range = animation frames) and its '
                                        'texture as the unit\'s model')
     scale: FloatProperty(name='Model Scale', default=1.0, min=0.0001,
