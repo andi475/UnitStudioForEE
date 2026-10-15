@@ -324,7 +324,7 @@ OBJ = dict(id=116, hp=120, range=132, line_of_sight=136,
 # practically unused (2 and 0 of the game's techs).
 TECH = dict(id=100, key=104, first_epoch=108, last_epoch=112, wood=124, stone=128, gold=136,
             iron=144, food=148, build_ms=152, requires=156, object=172, button=176)
-BTN = dict(id=204, slot=216)
+BTN = dict(texture=100, id=204, slot=216)  # texture: 100-byte path of the 64x64 icon
 ANIM = dict(idle=(164, 168), walk=(124, 128), attack=(204, 208), attack2=(244, 248), death=(284, 288))
 CORPSE = (308, 312)  # frame shown after death (= last death frame)
 GFX_ID = 104
@@ -408,6 +408,9 @@ def custom_model_path(gid):
 
 def custom_texture_path(gid):
     return 'textures\\mod%dt.sst' % gid
+
+def custom_icon_path(oid):
+    return 'textures\\mod%di.sst' % oid
 
 def slug(name):
     return ''.join(c if c.isalnum() else '_' for c in name.lower()).strip('_') or 'unit'
@@ -603,6 +606,61 @@ class GameSession:
                           'effects': lambda: EffectTable(data)}[key]()
         return cache[key]
 
+    # ------------------------------------------------------------ icons
+    @staticmethod
+    def _button_texture(rec):
+        return bytes(rec[BTN['texture']:BTN['texture'] + 100]).split(b'\0')[0].decode('latin1')
+
+    def button_of(self, oid):
+        """The button the unit is trained with (that of its tech), or its own."""
+        t = self.tech_of(oid)
+        return i32(t[2], TECH['button']) if t else i32(self.objs.recs[oid], OBJ['button'])
+
+    def icon_file(self, oid):
+        """(.sst bytes or None, path) of the unit's button icon."""
+        bid = self.button_of(oid)
+        if not 0 < bid < len(self.btns.recs):
+            return None, ''
+        path = self._button_texture(self.btns.recs[bid])
+        return (self.game_file(path) if path else None), path
+
+    def set_icon(self, oid, sst):
+        """Give the unit a new button icon (sst: 64x64 texture). Every button
+        the unit is trained with gets it - also those of its copies in single
+        buildings; a button other units use too is copied first, so they keep
+        their icon. The file is stored as textures\\mod<unit>i.sst."""
+        mine = [(sec, idx) for sec, recs in enumerate(self.techs.secs) for idx, r in enumerate(recs)
+                if idx and i32(r, TECH['id']) != -1 and i32(r, TECH['object']) == oid]
+        obj = self.objs.recs[oid]
+        bids = {i32(self.techs.secs[sec][idx], TECH['button']) for sec, idx in mine} or {i32(obj, OBJ['button'])}
+        bids = {b for b in bids if 0 < b < len(self.btns.recs)}
+        if not bids:
+            raise GameError('this object has no button')
+        path = custom_icon_path(oid)
+        for bid in bids:
+            others = any(i32(r, TECH['button']) == bid and i32(r, TECH['object']) != oid
+                         for recs in self.techs.secs for r in recs[1:] if i32(r, TECH['id']) != -1) or \
+                any(i32(r, OBJ['button']) == bid for b, r in enumerate(self.objs.recs)
+                    if b and b != oid and i32(r, OBJ['id']) == b)
+            target = bid
+            if others:  # shared with other units: this unit gets its own copy of the button
+                try:
+                    target = next(i for i, r in enumerate(self.btns.recs) if i > 1 and i32(r, BTN['id']) == -1)
+                except StopIteration:
+                    raise GameError('no free slot left in the game tables')
+                b = bytearray(self.btns.recs[bid])
+                set_i32(b, BTN['id'], target)
+                self.btns.recs[target] = b
+                for sec, idx in mine:
+                    if i32(self.techs.secs[sec][idx], TECH['button']) == bid:
+                        set_i32(self.techs.secs[sec][idx], TECH['button'], target)
+                if i32(obj, OBJ['button']) == bid:
+                    set_i32(obj, OBJ['button'], target)
+            raw = path.encode('latin1')
+            self.btns.recs[target][BTN['texture']:BTN['texture'] + 100] = raw + bytes(100 - len(raw))
+        self.new_files[path] = pack_file(sst)
+        return path
+
     def modified(self):
         """What differs from the original game files: ({unit: 'created' or
         'changed'}, {graphics records that changed}). Compares what Reset Unit
@@ -672,6 +730,12 @@ class GameSession:
         bid = i32(rec, OBJ['button'])
         if 0 <= bid < len(obtns.recs):
             self.btns.recs[bid] = bytearray(obtns.recs[bid])
+        # button copies made for an icon: free them when nothing uses them any more
+        used = {i32(r, TECH['button']) for recs in self.techs.secs for r in recs[1:] if i32(r, TECH['id']) != -1} | \
+            {i32(r, OBJ['button']) for b, r in enumerate(self.objs.recs) if b and i32(r, OBJ['id']) == b}
+        for b in range(2, min(len(self.btns.recs), len(obtns.recs))):
+            if i32(obtns.recs[b], BTN['id']) == -1 and i32(self.btns.recs[b], BTN['id']) != -1 and b not in used:
+                self.btns.recs[b] = bytearray(obtns.recs[b])
         restore_gfx = lambda gid: self.gfx.recs.__setitem__(
             gid, [list(ogfx.recs[gid][0]), bytearray(ogfx.recs[gid][1])])
         orig_gids = {i32(rec, OBJ['graphics'])} | {g for _, _, g in self._set_graphics_effects(oid)}
@@ -1079,6 +1143,7 @@ class GameSession:
         """Remove custom models/textures no graphics record uses any more (e.g.
         after Reset Unit to Original)."""
         used = {strs[1].lower() + '.cem' for strs, _ in self.gfx.recs} | {strs[2].lower() for strs, _ in self.gfx.recs}
+        used |= {self._button_texture(r).lower() for r in self.btns.recs}  # icons
         for name in [n for n in blobs if CUSTOM_FILE.match(n) and n not in used]:
             del blobs[name]
 

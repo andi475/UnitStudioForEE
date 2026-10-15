@@ -36,7 +36,7 @@ Drag and Drop the zip file into a blender window
 or
 
 Blender → Edit → Preferences → Add-ons → ▾ menu (top right) → **Install from Disk…** → pick
-`ee_unit_studio-1.1.3.zip`. 
+`ee_unit_studio-1.1.4.zip`. 
 
 Then open the 3D Viewport sidebar (press **N**) → tab **Empire Earth**.
 
@@ -63,6 +63,11 @@ Then open the 3D Viewport sidebar (press **N**) → tab **Empire Earth**.
 5. To give the unit your own model, select your mesh and write: **Use Active Mesh as Model** is ticked by default
    (untick it to change only names, stats or animation frames without a mesh selected). The scene's frame
    range is exported (game frame 0 = the scene's start frame); keep it consistent with the animation frames.
+   **Icon** (folded away, for trainable units) shows the unit's current button icon. Pick any image as the **New
+   Icon** (it is scaled to 64×64; transparent parts get the **Background** color), or click **Render Icon from
+   Model** to render the active mesh from the front right; **Zoom** and **Orbit** (and the background color)
+   update the rendered icon right away. Write Changes to Game (or Create New Unit) gives it to the
+   unit; other units that shared the button keep theirs. Reset Unit to Original brings the old icon back.
 6. **Create New Unit** makes a new unit based on the selected one, with the values above (and the active mesh, if
    ticked). It gets its own button in the same buildings. **Epoch** 0 keeps the base unit's epoch. Created from an
    epoch-look row, the new unit has that look (it does not change its look with the epochs).

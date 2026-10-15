@@ -13,24 +13,26 @@ Language.dll (*.orig); "Restore Original Game Files" puts them back.
 bl_info = {
     "name": "EE Unit Studio (Empire Earth)",
     "author": "UnitMod",
-    "version": (1, 1, 3),
+    "version": (1, 1, 4),
     "blender": (4, 2, 0),
     "location": "3D Viewport > Sidebar > Empire Earth, File > Import-Export",
     "description": "Unofficial fan-made tool: edit Empire Earth units, models and textures in the game files",
     "category": "Import-Export",
 }
 
+import math
 import os
 import time
 
 import bpy
-from bpy.props import (BoolProperty, CollectionProperty, FloatProperty, IntProperty, IntVectorProperty,
-                       PointerProperty, StringProperty)
+from bpy.props import (BoolProperty, CollectionProperty, FloatProperty, FloatVectorProperty, IntProperty,
+                       IntVectorProperty, PointerProperty, StringProperty)
 from bpy_extras.io_utils import ExportHelper, ImportHelper
 
 from . import cem, gamedata, nodes
 
 _session = None  # gamedata.GameSession of the loaded game folder
+CURRENT_ICON = 'EE icon (current)'  # Blender image showing the selected unit's icon
 HAS_PLACEHOLDER = 'placeholder' in bpy.types.UILayout.bl_rna.functions['prop'].parameters.keys()
 
 
@@ -113,6 +115,21 @@ class EEUS_State(bpy.types.PropertyGroup):
     show_armor: BoolProperty(name='Armor', default=False, description='Show the armor values')
     show_stats: BoolProperty(name='Stats', default=False, description='Show hit points, attack, range and so on')
     show_cost: BoolProperty(name='Cost', default=False, description='Show the cost and build time')
+    show_icon: BoolProperty(name='Icon', default=False, description='Show the button icon')
+    icon_image: PointerProperty(type=bpy.types.Image, name='New Icon',
+                                description='Image for the unit\'s button (scaled to 64x64 when written); '
+                                            'leave empty to keep the current icon')
+    icon_background: FloatVectorProperty(name='Background', subtype='COLOR', size=3, min=0.0, max=1.0,
+                                         default=(0.15, 0.13, 0.1), update=lambda self, c: _rerender_icon(self, c),
+                                         description='Behind rendered icons and transparent parts of an image')
+    icon_zoom: FloatProperty(name='Zoom', default=1.0, min=0.25, max=4.0, soft_max=3.0,
+                             update=lambda self, c: _rerender_icon(self, c),
+                             description='Rendered icon: larger values move closer to the model')
+    icon_orbit: FloatProperty(name='Orbit', subtype='ANGLE', default=math.radians(29), min=-math.pi, max=math.pi,
+                              update=lambda self, c: _rerender_icon(self, c),
+                              description='Rendered icon: angle around the model (0 = from the front, positive = '
+                                          'from the right)')
+    icon_source: StringProperty()  # the object the rendered icon shows
     food: IntProperty(name='Food', min=0)
     wood: IntProperty(name='Wood', min=0)
     stone: IntProperty(name='Stone', min=0)
@@ -209,6 +226,8 @@ def fill_edit_fields(context):
     st.build_time = u.get('build_time', 0.0)
     for a, prop in ANIM_PROPS.items():
         setattr(st, prop, u['anims'][a] if 'anims' in u else (0, 0))
+    st.icon_image = None  # a new icon is picked per unit
+    cem.show_icon(s.icon_file(oid)[0], CURRENT_ICON)
     st.is_created = s.created_base(oid) is not None
     st.available_now = s.is_available_now(oid)
     parts = ['#%d %s' % (oid, u['internal'])]
@@ -252,6 +271,7 @@ def apply_fields(context, s, oid, base_anims=None, base_oid=None, gid=None, refe
         if reference is None:
             reference = s.original_model(oid, base_oid, gid)
         data, sst, msg = cem.export_model(context, obj, st.scale, True, reference)
+        msg = 'Model: ' + msg
         gid = s.set_model(oid, data, sst, gid=gid)
         s.set_animations(oid, anims, gid=gid)
     elif current and anims != current:
@@ -263,6 +283,9 @@ def apply_fields(context, s, oid, base_anims=None, base_oid=None, gid=None, refe
                 'read, so its frame count is unknown. Replace the model (Use Active Mesh as Model) to change them.')
         check_anim_frames(anims, len(model['frames']))
         s.set_animations(oid, anims, gid=gid)
+    if st.icon_image:
+        s.set_icon(oid, cem.image_to_icon_sst(st.icon_image, tuple(st.icon_background)))
+        msg = (msg + '; ' if msg else '') + 'new icon'
     return msg
 
 
@@ -351,7 +374,7 @@ class EEUS_OT_write(_NeedsUnit, bpy.types.Operator):
             self.report({'ERROR'}, str(e))
             return {'CANCELLED'}
         fill_list(context, oid, look_name)
-        self.report({'INFO'}, 'Saved to game in %.1fs%s' % (time.time() - t, ('. Model: ' + msg) if msg else ''))
+        self.report({'INFO'}, 'Saved to game in %.1fs%s' % (time.time() - t, ('. ' + msg) if msg else ''))
         return {'FINISHED'}
 
 
@@ -383,7 +406,40 @@ class EEUS_OT_create(_NeedsUnit, bpy.types.Operator):
             self.report({'ERROR'}, str(e))
             return {'CANCELLED'}
         fill_list(context, oid)
-        self.report({'INFO'}, '"%s" created (%s)%s' % (name, desc, ('. Model: ' + msg) if msg else ''))
+        self.report({'INFO'}, '"%s" created (%s)%s' % (name, desc, ('. ' + msg) if msg else ''))
+        return {'FINISHED'}
+
+
+def _rerender_icon(st, context):
+    """Zoom, Orbit and Background update a rendered icon right away."""
+    obj = bpy.data.objects.get(st.icon_source)
+    if not (st.icon_image and st.icon_image.name == cem.RENDERED_ICON and obj):
+        return
+    try:
+        st.icon_image = cem.render_icon(context, obj, tuple(st.icon_background), st.icon_zoom, st.icon_orbit)
+    except RuntimeError:
+        pass
+
+
+class EEUS_OT_render_icon(bpy.types.Operator):
+    """Render the active mesh as the new button icon (from the front right, a little from above); Write Changes
+    to Game then gives it to the unit"""
+    bl_idname = 'ee_unit_studio.render_icon'
+    bl_label = 'Render Icon from Model'
+
+    @classmethod
+    def poll(cls, context):
+        return context.active_object is not None and context.active_object.type == 'MESH'
+
+    def execute(self, context):
+        st = state(context)
+        try:
+            st.icon_source = context.active_object.name
+            st.icon_image = cem.render_icon(context, context.active_object, tuple(st.icon_background),
+                                            st.icon_zoom, st.icon_orbit)
+        except RuntimeError as e:
+            self.report({'ERROR'}, str(e))
+            return {'CANCELLED'}
         return {'FINISHED'}
 
 
@@ -580,6 +636,23 @@ class EEUS_PT_panel(bpy.types.Panel):
                 col.prop(st, 'armor_' + a)
         if u['trainable']:
             col = box.column(align=True)
+            if fold(col, st, 'show_icon', 'Icon'):
+                row = col.row()
+                for img, label in ((bpy.data.images.get(CURRENT_ICON), 'Current'), (st.icon_image, 'New')):
+                    c = row.column(align=True)
+                    c.label(text=label)
+                    if img:
+                        c.template_icon(icon_value=c.icon(img), scale=4)
+                    else:
+                        c.label(text='(none)')
+                col.template_ID(st, 'icon_image', open='image.open')
+                col.prop(st, 'icon_background')
+                col.operator(EEUS_OT_render_icon.bl_idname, icon='RENDER_STILL')
+                sub = col.column(align=True)
+                sub.prop(st, 'icon_zoom', slider=True)
+                sub.prop(st, 'icon_orbit', slider=True)
+        if u['trainable']:
+            col = box.column(align=True)
             if fold(col, st, 'show_cost', 'Cost and Build Time'):
                 for c in gamedata.COSTS:
                     col.prop(st, c)
@@ -625,7 +698,7 @@ def _menu_export(self, context):
 
 
 classes = (EEUS_Preferences, EEUS_UnitItem, EEUS_State, EEUS_OT_load, EEUS_OT_import, EEUS_OT_write,
-           EEUS_OT_create, EEUS_OT_reset, EEUS_OT_restore, EEUS_OT_import_file, EEUS_OT_export_file, EEUS_UL_units,
+           EEUS_OT_create, EEUS_OT_render_icon, EEUS_OT_reset, EEUS_OT_restore, EEUS_OT_import_file, EEUS_OT_export_file, EEUS_UL_units,
            EEUS_PT_panel)
 
 

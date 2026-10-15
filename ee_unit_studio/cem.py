@@ -241,6 +241,16 @@ def tga_to_sst(tga):
 def rgba_to_sst(width, height, rgba_bottom_up):
     return images_to_sst(width, height, [rgba_bottom_up])
 
+ICON_SIZE = 64  # every button icon of the game: 64x64, 24 bit, one image
+
+def icon_sst(rgb_bottom_up):
+    """ICON_SIZE x ICON_SIZE RGB bytes (rows bottom-up) -> .sst laid out exactly
+    like the game's own button icons."""
+    px = bytearray(rgb_bottom_up)
+    px[0::3], px[2::3] = rgb_bottom_up[2::3], rgb_bottom_up[0::3]  # RGB -> BGR
+    return (sst_header(ICON_SIZE, ICON_SIZE) + b'\0' +
+            struct.pack('<BBB5sHHHHBB', 0, 0, 2, b'\0' * 5, 0, 0, ICON_SIZE, ICON_SIZE, 24, 0) + px)
+
 # ---------------------------------------------------------------- blender
 try:
     import bpy
@@ -368,6 +378,109 @@ if bpy:
         if keys and keys.animation_data and keys.animation_data.action:
             keys.animation_data.action[IMPORT_TAG] = True
         return obj
+
+    def image_to_icon_sst(image, background=(0.0, 0.0, 0.0)):
+        """A Blender image -> button icon .sst (scaled to 64x64, transparent
+        parts filled with the background color)."""
+        img = image.copy()
+        try:
+            if tuple(img.size) != (ICON_SIZE, ICON_SIZE):
+                img.scale(ICON_SIZE, ICON_SIZE)
+            px = array('f', [0.0]) * (ICON_SIZE * ICON_SIZE * 4)
+            img.pixels.foreach_get(px)
+        finally:
+            bpy.data.images.remove(img)
+        rgb = bytearray(ICON_SIZE * ICON_SIZE * 3)
+        for i in range(ICON_SIZE * ICON_SIZE):
+            a = px[4 * i + 3]
+            for c in range(3):
+                v = px[4 * i + c] * a + background[c] * (1.0 - a)
+                rgb[3 * i + c] = max(0, min(255, int(round(v * 255))))
+        return icon_sst(bytes(rgb))
+
+    RENDERED_ICON = 'EE icon (rendered)'
+
+    def render_icon(context, obj, background=(0.15, 0.13, 0.1), zoom=1.0, orbit=math.radians(29), elevation=math.radians(24)):
+        """Render obj (and the meshes parented to it) as a square picture for a
+        button icon: orbit = angle around it (0 = straight from the front, the
+        side units face, +Y; positive = from the right), zoom > 1 = closer.
+        Uses a temporary scene, so the user's scene is not touched. Returns the image."""
+        import tempfile
+        objs = [obj] + [c for c in obj.children_recursive if c.type == 'MESH']
+        deps = context.evaluated_depsgraph_get()
+        pts = []
+        for o in objs:
+            ev = o.evaluated_get(deps)
+            mesh = ev.to_mesh()
+            pts += [ev.matrix_world @ v.co for v in mesh.vertices]
+            ev.to_mesh_clear()
+        if not pts:
+            raise RuntimeError('"%s" has no vertices' % obj.name)
+        lo = Vector([min(p[i] for p in pts) for i in range(3)])
+        hi = Vector([max(p[i] for p in pts) for i in range(3)])
+        center, size = (lo + hi) / 2, max(hi - lo) or 1.0
+        path = os.path.join(tempfile.gettempdir(), 'ee_unit_studio_icon.png')
+        scene = bpy.data.scenes.new('EE icon render')
+        cam_data = bpy.data.cameras.new('EE icon camera')
+        cam = bpy.data.objects.new('EE icon camera', cam_data)
+        world = bpy.data.worlds.new('EE icon world')
+        try:
+            for o in objs:
+                scene.collection.objects.link(o)
+            scene.collection.objects.link(cam)
+            cam_data.type, cam_data.ortho_scale = 'ORTHO', size * 1.15 / max(zoom, 0.01)
+            cam_data.clip_end = size * 20
+            direction = Vector((math.sin(orbit) * math.cos(elevation), math.cos(orbit) * math.cos(elevation),
+                                math.sin(elevation)))
+            cam.location = center + direction * size * 4
+            cam.rotation_euler = (center - cam.location).to_track_quat('-Z', 'Y').to_euler()
+            scene.camera = cam
+            world.color = background
+            scene.world = world
+            scene.frame_current = context.scene.frame_current
+            r = scene.render
+            r.engine = 'BLENDER_WORKBENCH'
+            r.resolution_x = r.resolution_y = ICON_SIZE * 4  # rendered larger, scaled down when written
+            r.resolution_percentage = 100
+            r.film_transparent = False
+            r.image_settings.file_format, r.image_settings.color_mode = 'PNG', 'RGB'
+            r.filepath = path
+            shading = scene.display.shading
+            shading.light, shading.color_type = 'STUDIO', 'TEXTURE'
+            bpy.ops.render.render(write_still=True, scene=scene.name)
+        finally:
+            bpy.data.scenes.remove(scene)
+            bpy.data.objects.remove(cam)
+            bpy.data.cameras.remove(cam_data)
+            bpy.data.worlds.remove(world)
+        new = bpy.data.images.load(path, check_existing=False)
+        old = bpy.data.images.get(RENDERED_ICON)
+        if old and tuple(old.size) == tuple(new.size):  # update in place: the panel preview follows at once
+            px = array('f', [0.0]) * len(new.pixels)
+            new.pixels.foreach_get(px)
+            old.pixels.foreach_set(px)
+            old.pack()
+            bpy.data.images.remove(new)
+            if old.preview:
+                old.preview.reload()
+            return old
+        if old:
+            bpy.data.images.remove(old)
+        new.pack()
+        new.name = RENDERED_ICON
+        return new
+
+    def show_icon(sst, name):
+        """An icon .sst as a Blender image (replacing an older one of that name), for the preview."""
+        old = bpy.data.images.get(name)
+        if old:
+            bpy.data.images.remove(old)
+        if not sst:
+            return None
+        img = _load_images(sst, name + '.sst')[0]
+        img.name = name
+        del img[IMPORT_TAG]  # not part of an imported model: Clear Previous Model keeps it
+        return img
 
     def clear_imported():
         """Delete everything an earlier import created (objects, meshes,
