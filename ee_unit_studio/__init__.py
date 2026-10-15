@@ -13,7 +13,7 @@ Language.dll (*.orig); "Restore Original Game Files" puts them back.
 bl_info = {
     "name": "EE Unit Studio (Empire Earth)",
     "author": "UnitMod",
-    "version": (1, 1, 2),
+    "version": (1, 1, 3),
     "blender": (4, 2, 0),
     "location": "3D Viewport > Sidebar > Empire Earth, File > Import-Export",
     "description": "Unofficial fan-made tool: edit Empire Earth units, models and textures in the game files",

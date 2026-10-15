@@ -36,7 +36,7 @@ Drag and Drop the zip file into a blender window
 or
 
 Blender → Edit → Preferences → Add-ons → ▾ menu (top right) → **Install from Disk…** → pick
-`ee_unit_studio-1.1.2.zip`. 
+`ee_unit_studio-1.1.3.zip`. 
 
 Then open the 3D Viewport sidebar (press **N**) → tab **Empire Earth**.
 
@@ -90,7 +90,7 @@ first, then open the sidebar (**N**) → tab **Empire Earth**:
   earlier epochs that are still available (every tech has a first and a last epoch; the Clubman, for example, is
   available from Prehistoric to Renaissance). The inputs are the button slots: *Bottom · 1–16* is the bottom row of
   the in-game panel, *Row 2* and *Row 3* the rows above. Grey slots marked *free* are empty in every epoch and safe
-  to use; slots of fixed buttons like Stop or Populate are left out. **Other Epochs** also shows the slots used only
+  to use; slots of fixed buttons like Stop or Populate are left out. **Other Epochs** (on by default) shows the slots used only
   in other epochs (with their names), e.g. to give a unit the slot of the one it replaces.
 * Each button is a node on the left, labelled with its first epoch (brown ones are research). **Add Unit** adds any
   trainable unit; **Add Epoch** adds another epoch of the selected building (also one it has no buttons in yet).
@@ -100,8 +100,10 @@ first, then open the sidebar (**N**) → tab **Empire Earth**:
   later epoch's node: it is no longer available there from that epoch on (also remove it from the epochs after
   that, as a unit cannot come back later). If other buildings have the same unit, this building first gets its own
   copy of it (same unit, button and upgrade events), so the others keep theirs.
-* A button has one slot in every building that has it, so a unit linked to two buildings must use the same slot in
-  both (Write refuses otherwise).
+* Buildings can share a unit (a building created from another one has all of its units). Moving such a unit, or
+  ending it in a later epoch, in one building first gives that building its own copy of it (same unit, cost and
+  upgrade events, its own button), so the other buildings keep theirs. Within one building a unit has one slot in
+  all its epochs.
 * **Write to Game** applies the links (only for the epochs that have a node; deleting a node changes nothing);
   **Reload from Game** discards links that were not written yet.
 

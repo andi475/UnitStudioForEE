@@ -924,21 +924,11 @@ class GameSession:
         missing) and their slot; removals: {building: tech keys} to take off;
         everything else on a building's list stays. lasts: {building: {tech
         key: last epoch}} in which the tech is available there (it disappears
-        after it); a tech other buildings have too is first copied for this
-        building, so they keep theirs. Keeps the techs' own lists of buildings
-        in step. A button is shared by all buildings, so one tech must have the
-        same slot everywhere. Returns a list of change descriptions."""
-        slot_of, by_button = {}, {}
-        for b, techs in panels.items():
-            for k, slot in techs.items():
-                if slot_of.setdefault(k, slot) != slot:
-                    raise GameError('"%s" is linked to different slots (%d and %d); a button has the same slot in '
-                                    'every building' % (self.tech_info(k)['label'], slot_of[k], slot))
-                bid = self.tech_info(k)['button']
-                other = by_button.setdefault(bid, (k, slot))
-                if other[1] != slot:
-                    raise GameError('"%s" and "%s" share one button, so they need the same slot'
-                                    % (self.tech_info(other[0])['label'], self.tech_info(k)['label']))
+        after it). Slot and epochs are stored in the tech and its button, which
+        other buildings may share: such a tech is first copied for this
+        building (own tech and button), so the others keep theirs. Keeps the
+        techs' own lists of buildings in step. Returns a list of change
+        descriptions."""
         changes, removals = [], removals or {}
         for b in set(panels) | set(removals):
             techs, r = panels.get(b, {}), self.objs.recs[b]
@@ -953,40 +943,63 @@ class GameSession:
                 self._tech_buildings(k, remove=b)
                 changes.append('%s removed from %s' % (self.tech_info(k)['label'], name_of(r).strip()))
             struct.pack_into('<200i', r, OBJ['tech_list'], *(new + [-1] * (200 - len(new))))
-        for k, slot in slot_of.items():
-            info = self.tech_info(k)
-            if info['slot'] != slot:
-                set_i32(self.btns.recs[info['button']], BTN['slot'], slot)
-                changes.append('%s moved to slot %d' % (info['label'], slot))
+        own = {}  # (building, tech key) -> key of the building's own copy
+        def for_building(b, k):
+            if (b, k) not in own:
+                own[(b, k)] = self._own_tech(k, b) if self._shared(k, b) else k
+            return own[(b, k)]
+        for b, techs in panels.items():
+            bname = name_of(self.objs.recs[b]).strip()
+            for k, slot in techs.items():
+                info = self.tech_info(k)
+                if info['slot'] == slot:
+                    continue
+                k2 = for_building(b, k)
+                set_i32(self.btns.recs[self.tech_info(k2)['button']], BTN['slot'], slot)
+                changes.append('%s %smoved to slot %d' % (info['label'], 'at %s: own copy, ' % bname
+                                                        if k2 != k else '', slot))
         for b, techs in (lasts or {}).items():
             bname = name_of(self.objs.recs[b]).strip()
             for k, last in techs.items():
-                info = self.tech_info(k)
+                info = self.tech_info(own.get((b, k), k))
                 if info['last'] == last:
                     continue
                 until = EPOCHS[last] if last < len(EPOCHS) else 'the end'
-                if any(b2 != b and k in struct.unpack_from('<200i', r, OBJ['tech_list'])
-                       for b2, r in enumerate(self.objs.recs) if b2 and i32(r, OBJ['id']) == b2):
-                    k = self._own_tech(k, b)
-                    changes.append('%s at %s: own copy, available until %s' % (info['label'], bname, until))
-                else:
-                    changes.append('%s available until %s' % (info['label'], until))
-                set_i32(self.techs.find_key(k)[2], TECH['last_epoch'], last)
+                copied = (b, k) not in own and self._shared(k, b)
+                k2 = for_building(b, k)
+                set_i32(self.techs.find_key(k2)[2], TECH['last_epoch'], last)
+                changes.append('%s %savailable until %s' % (info['label'], 'at %s: own copy, ' % bname
+                                                           if copied else '', until))
         return changes
+
+    def _shared(self, key, building):
+        """Does anything besides this building use the tech or its button?"""
+        bid = self.tech_info(key)['button']
+        if any(b != building and key in struct.unpack_from('<200i', r, OBJ['tech_list'])
+               for b, r in enumerate(self.objs.recs) if b and i32(r, OBJ['id']) == b):
+            return True
+        return any(i32(r, TECH['button']) == bid and i32(r, TECH['key']) != key
+                   for sec in self.techs.secs for r in sec[1:] if i32(r, TECH['id']) != -1)
 
     def _own_tech(self, key, building):
         """Give one building its own copy of a tech that other buildings have
-        too (same unit, button, cost and the same enabling/disabling events), so
-        it can be changed for that building alone. Returns the copy's key."""
+        too: same unit, cost and enabling/disabling events, and its own copy of
+        the button, so slot and epochs can be changed for that building alone.
+        Returns the copy's key."""
         sec, _, rec = self.techs.find_key(key)
         try:
             idx = next(i for i, r in enumerate(self.techs.secs[sec]) if i > 0 and i32(r, TECH['id']) == -1)
+            bid = next(i for i, r in enumerate(self.btns.recs) if i > 1 and i32(r, BTN['id']) == -1)
         except StopIteration:
             raise GameError('no free slot left in the game tables')
         new_key = TechTree.key(sec, idx)
+        b = bytearray(self.btns.recs[i32(rec, TECH['button'])])
+        set_i32(b, BTN['id'], bid)
+        self.btns.recs[bid] = b
         t = bytearray(rec[:268]) + struct.pack('<Ii', 1, building)
         set_i32(t, TECH['id'], max(i32(r, TECH['id']) for s in self.techs.secs for r in s) + 1)
         set_i32(t, TECH['key'], new_key)
+        set_i32(t, TECH['button'], bid)
         self.techs.secs[sec][idx] = t
         self.copy_enablers(key, new_key, types=(ENABLE_TECH, DISABLE_TECH))
         r = self.objs.recs[building]

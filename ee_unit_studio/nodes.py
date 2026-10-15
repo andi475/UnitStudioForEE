@@ -103,7 +103,7 @@ class EEUS_BuildingNode(_InTree, bpy.types.Node):
     show_free: BoolProperty(name='Free Slots', default=True, update=_update_shown,
                             description='Also show the slots that are free in every epoch (slots of fixed buttons '
                                         'like Stop or Populate are never offered)')
-    show_other: BoolProperty(name='Other Epochs', default=False, update=_update_shown,
+    show_other: BoolProperty(name='Other Epochs', default=True, update=_update_shown,
                              description='Also show the slots used only in other epochs, e.g. to put a unit in the '
                                          'slot of the one it replaces')
 
@@ -528,8 +528,8 @@ class EEUS_PT_nodes(bpy.types.Panel):
         box = layout.box().column(align=True)
         for line in ('A building node shows one epoch,', 'with the units of earlier epochs', 'still available in it.',
                      'Link a unit to a slot: trained', 'there. Remove the link in its own', 'epoch: off the building; in a',
-                     'later epoch: gone there from that', 'epoch on. A button has one slot', 'in every building. Brown nodes',
-                     'are research.'):
+                     'later epoch: gone there from that', 'epoch on. Other buildings with', 'the same unit keep theirs.',
+                     'Brown nodes are research.'):
             box.label(text=line)
 
 
