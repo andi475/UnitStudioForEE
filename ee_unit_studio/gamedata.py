@@ -966,6 +966,7 @@ class GameSession:
         return dict(key=key, slot=i32(self.btns.recs[bid], BTN['slot']), button=bid, unit=obj if is_obj else -1,
                     section=sec, first=i32(rec, TECH['first_epoch']), last=i32(rec, TECH['last_epoch']),
                     label=label or name_of(self.btns.recs[bid]).strip() or name_of(rec).strip(),
+                    icon=self._button_texture(self.btns.recs[bid]),
                     epoch=EPOCHS[sec] if sec < len(EPOCHS) else str(sec + 1))
 
     def panel_of(self, building):

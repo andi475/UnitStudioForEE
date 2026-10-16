@@ -36,7 +36,7 @@ Drag and Drop the zip file into a blender window
 or
 
 Blender → Edit → Preferences → Add-ons → ▾ menu (top right) → **Install from Disk…** → pick
-`ee_unit_studio-1.1.4.zip`. 
+`ee_unit_studio-1.1.5.zip`. 
 
 Then open the 3D Viewport sidebar (press **N**) → tab **Empire Earth**.
 
@@ -97,7 +97,8 @@ first, then open the sidebar (**N**) → tab **Empire Earth**:
   the in-game panel, *Row 2* and *Row 3* the rows above. Grey slots marked *free* are empty in every epoch and safe
   to use; slots of fixed buttons like Stop or Populate are left out. **Other Epochs** (on by default) shows the slots used only
   in other epochs (with their names), e.g. to give a unit the slot of the one it replaces.
-* Each button is a node on the left, labelled with its first epoch (brown ones are research). **Add Unit** adds any
+* Each button is a small node on the left with its name, its first epoch and its in-game icon (brown ones are
+  research; widen a node to read a long name); the building nodes show the building's icon. **Add Unit** adds any
   trainable unit; **Add Epoch** adds another epoch of the selected building (also one it has no buttons in yet).
 * **Link** a unit to a slot: the building trains it there. Linked into a later epoch than its last one, it stays
   available there until that epoch. **Move the link** to another slot: the button moves.

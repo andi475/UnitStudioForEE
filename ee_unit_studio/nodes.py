@@ -9,12 +9,16 @@ still available are linked too. Write to Game makes the game's building
 lists, button slots and the epochs in which a tech is available (first to
 last epoch) match the links.
 """
+import os
 import sys
+import tempfile
+import zlib
 
 import bpy
+import bpy.utils.previews
 from bpy.props import BoolProperty, EnumProperty, IntProperty, StringProperty
 
-from . import gamedata
+from . import cem, gamedata
 
 TREE = 'EEUS_PanelTree'
 SLOT_SOCKET, BUTTON_SOCKET = 'EEUS_SlotSocket', 'EEUS_ButtonSocket'
@@ -34,6 +38,49 @@ def _session(context):
 
 def slot_label(slot):
     return '%s · %d' % (ROW_LABEL.get(slot // 16, 'Row %d' % (slot // 16 + 1)), slot % 16 + 1)
+
+
+# ---------------------------------------------------------------- button icons
+_previews = None  # bpy.utils.previews collection with the icons shown on the nodes
+_icon_keys = {}  # (game file date, texture path) -> preview key ('' = no icon)
+ICON_SCALE = 3.0  # icon size on the building nodes (x 20 pixels)
+UNIT_ICON_SCALE = 2.5  # and on the unit nodes, which are kept just big enough for it
+UNIT_WIDTH = 130
+UNIT_STEP = 115  # vertical distance of the unit nodes (header, icon, socket)
+
+
+def icon_id(s, path):
+    """Preview icon id of a button texture (0 = none). Each icon is read from
+    the game archive once and kept until the game files change."""
+    if not path or _previews is None:
+        return 0
+    token = (os.path.getmtime(s.ssa), path.lower())
+    key = _icon_keys.get(token)
+    if key is None:
+        key = ''
+        try:
+            data = s.game_file(path)
+            if data:
+                tga = cem.sst_images(data)[0]
+                key = '%08x' % zlib.crc32(tga)
+                if key not in _previews:
+                    folder = os.path.join(tempfile.gettempdir(), 'ee_unit_studio_icons')
+                    os.makedirs(folder, exist_ok=True)
+                    f = os.path.join(folder, key + '.tga')
+                    with open(f, 'wb') as out:
+                        out.write(tga)
+                    _previews.load(key, f, 'IMAGE')
+        except (OSError, ValueError, IndexError, KeyError):
+            key = ''
+        _icon_keys[token] = key
+    return _previews[key].icon_id if key else 0
+
+
+def _draw_icon(layout, context, path, scale=ICON_SCALE):
+    s = _addon().session(context)
+    iid = icon_id(s, path) if s else 0
+    if iid:
+        layout.template_icon(icon_value=iid, scale=scale)
 
 
 def epoch_name(sec):
@@ -100,6 +147,7 @@ class EEUS_BuildingNode(_InTree, bpy.types.Node):
     bl_icon = 'HOME'
     oid: IntProperty()
     epoch: IntProperty()  # epoch section, 0 = Prehistoric
+    icon: StringProperty()  # texture of the building's own button
     show_free: BoolProperty(name='Free Slots', default=True, update=_update_shown,
                             description='Also show the slots that are free in every epoch (slots of fixed buttons '
                                         'like Stop or Populate are never offered)')
@@ -111,6 +159,7 @@ class EEUS_BuildingNode(_InTree, bpy.types.Node):
         self.width = 260
 
     def draw_buttons(self, context, layout):
+        _draw_icon(layout, context, self.icon)
         row = layout.row(align=True)
         row.prop(self, 'show_free', toggle=True)
         row.prop(self, 'show_other', toggle=True)
@@ -135,10 +184,16 @@ class EEUS_UnitNode(_InTree, bpy.types.Node):
     bl_icon = 'COMMUNITY'
     key: IntProperty()  # tech key
     section: IntProperty()  # the first epoch it is available in
+    icon: StringProperty()  # texture of its button
+
+    bl_width_min = 60
 
     def init(self, context):
-        self.outputs.new(BUTTON_SOCKET, '')
-        self.width = 240
+        self.outputs.new(BUTTON_SOCKET, '')  # named after the first epoch (shown next to the socket)
+        self.width = UNIT_WIDTH
+
+    def draw_buttons(self, context, layout):
+        _draw_icon(layout, context, self.icon, UNIT_ICON_SCALE)
 
 
 # ---------------------------------------------------------------- filling the tree
@@ -156,13 +211,17 @@ def _tree(context, create=True):
 
 
 def _unit_node(tree, s, key, location):
+    info = s.tech_info(key)
     for n in tree.nodes:
         if n.bl_idname == EEUS_UnitNode.bl_idname and n.key == key:
+            n.icon = info['icon']  # may have changed (custom icon)
+            icon_id(s, n.icon)
             return n
-    info = s.tech_info(key)
     n = tree.nodes.new(EEUS_UnitNode.bl_idname)
-    n.key, n.section, n.location = key, info['first'], location
-    n.label = '%s · %s' % (info['label'], info['epoch'])
+    n.key, n.section, n.location, n.icon = key, info['first'], location, info['icon']
+    icon_id(s, n.icon)  # read now rather than while drawing
+    n.label = info['label']
+    n.outputs[0].name = epoch_name(info['first'])
     if info['unit'] < 0:  # research: brown
         n.use_custom_color, n.color = True, (0.32, 0.27, 0.22)
     return n
@@ -195,13 +254,13 @@ def load_building(tree, s, node):
         infos = by_slot.get(sock.slot, [])
         infos.sort(key=lambda i: -i['first'])  # this epoch's first, older ones further left
         for j, info in enumerate(infos):  # several buttons in one slot: side by side
-            un = _unit_node(tree, s, info['key'], (node.location.x - 300 - 270 * j, y))
+            un = _unit_node(tree, s, info['key'], (node.location.x - UNIT_WIDTH - 60 - (UNIT_WIDTH + 30) * j, y))
             tree.links.new(un.outputs[0], sock)
         if infos:
-            y -= 50
+            y -= UNIT_STEP
     _update_shown(node, None)
     shown = sum(1 for sock in node.inputs if sock.enabled)
-    return max(node.location.y - y, 60 + 20 * shown)
+    return max(node.location.y - y, 60 + 20 * ICON_SCALE + 20 * shown)
 
 
 def available(info, epoch):
@@ -284,6 +343,8 @@ def add_epoch(tree, s, oid, epoch, location):
     name = s.display_name(oid) or gamedata.name_of(s.objs.recs[oid]).strip()
     node.oid, node.epoch, node.location = oid, epoch, location
     node.label = '%s · %s' % (name, epoch_name(epoch))
+    node.icon = s.icon_file(oid)[1]
+    icon_id(s, node.icon)
     return node, load_building(tree, s, node)
 
 
@@ -295,8 +356,8 @@ def add_building(context, oid, epoch):
     if same:
         # below the building's lowest node or linked unit (sizes are estimated:
         # a node that was never drawn has no dimensions yet)
-        bottom = min(min(n.location.y - max(n.dimensions.y, 60 + 20 * sum(x.enabled for x in n.inputs)),
-                         *[l.from_node.location.y - 60 for x in n.inputs for l in x.links])
+        bottom = min(min(n.location.y - max(n.dimensions.y, 60 + 20 * ICON_SCALE + 20 * sum(x.enabled for x in n.inputs)),
+                         *[l.from_node.location.y - UNIT_STEP for x in n.inputs for l in x.links])
                      for n in same)
         location = (same[0].location.x, bottom - 120)
     else:
@@ -573,6 +634,8 @@ def _open_on_our_tab():
 
 
 def register():
+    global _previews
+    _previews = bpy.utils.previews.new()
     for c in classes:
         bpy.utils.register_class(c)
     bpy.types.NODE_MT_add.append(_menu_add)
@@ -585,3 +648,8 @@ def unregister():
     bpy.types.NODE_MT_add.remove(_menu_add)
     for c in reversed(classes):
         bpy.utils.unregister_class(c)
+    global _previews
+    if _previews is not None:
+        bpy.utils.previews.remove(_previews)
+        _previews = None
+    _icon_keys.clear()
