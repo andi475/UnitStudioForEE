@@ -36,7 +36,7 @@ Drag and Drop the zip file into a blender window
 or
 
 Blender → Edit → Preferences → Add-ons → ▾ menu (top right) → **Install from Disk…** → pick
-`ee_unit_studio-1.1.5.zip`. 
+`ee_unit_studio-1.1.6.zip`. 
 
 Then open the 3D Viewport sidebar (press **N**) → tab **Empire Earth**.
 
@@ -57,7 +57,7 @@ Then open the 3D Viewport sidebar (press **N**) → tab **Empire Earth**.
    (empties such as `attack`, `impact_00`). Timeline markers like `ee_walk 31-45` show which frames belong to which
    animation. With the trash-can toggle next to the button switched on, the previously imported model is deleted first
    (only objects created by an import, including copies of them; your own objects stay).
-4. Change **Name, Hit Points, Attack, Range, Reload Time, Line of Sight, Speed, Armor, Cost, Build Time** or the **Animation
+4. Change **Name, Hit Points, Attack, Range, Reload Time, Line of Sight, Speed, Can Attack (Ground / Air), Armor, Cost, Build Time** or the **Animation
    Frames**, then click **Write Changes to Game**. Speed is shown as in the game (Clubman 12). Stats, Armor, Cost and
    Animation Frames are folded away; click their heading to open them.
 5. To give the unit your own model, select your mesh and write: **Use Active Mesh as Model** is ticked by default
@@ -203,6 +203,9 @@ Technical notes on the file formats, found by analysing the data files for compa
 * `db\dbevents.dat` and `db\dbeffects.dat`: researching a tech fires its event, whose effects can enable (type 8) or
   disable (type 9) other techs, or give a unit another graphics record (type 6: unit at offset 20, graphics at 36) –
   that is how the epoch events change the look of citizens and buildings.
+* `db\dbfamily.dat`: 60 families (the kind of target a unit is: dbobjects offset 104), each with 68 damage percents,
+  one per attack class (dbobjects offset 224). A unit can only attack families its attack class does damage to;
+  that is what **Can Attack Ground / Air** changes (giving the unit its own attack class where needed).
 * Unit names live in the string table of `Language.dll`; new names are added from id 40000 up.
 * The `.cem` model and `.sst` texture formats are described at the top of `ee_unit_studio\cem.py`.
 

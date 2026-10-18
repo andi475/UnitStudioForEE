@@ -13,7 +13,7 @@ Language.dll (*.orig); "Restore Original Game Files" puts them back.
 bl_info = {
     "name": "EE Unit Studio (Empire Earth)",
     "author": "UnitMod",
-    "version": (1, 1, 5),
+    "version": (1, 1, 6),
     "blender": (4, 2, 0),
     "location": "3D Viewport > Sidebar > Empire Earth, File > Import-Export",
     "description": "Unofficial fan-made tool: edit Empire Earth units, models and textures in the game files",
@@ -116,6 +116,11 @@ class EEUS_State(bpy.types.PropertyGroup):
     show_stats: BoolProperty(name='Stats', default=False, description='Show hit points, attack, range and so on')
     show_cost: BoolProperty(name='Cost', default=False, description='Show the cost and build time')
     show_icon: BoolProperty(name='Icon', default=False, description='Show the button icon')
+    can_attack_ground: BoolProperty(name='Ground', default=True,
+                                    description='Can attack units and buildings on the ground and on water')
+    can_attack_air: BoolProperty(name='Air', default=False,
+                                 description='Can attack planes and bombers (ticking it also adds helicopters; '
+                                             'some ground units can hit those anyway)')
     icon_image: PointerProperty(type=bpy.types.Image, name='New Icon',
                                 description='Image for the unit\'s button (scaled to 64x64 when written); '
                                             'leave empty to keep the current icon')
@@ -219,6 +224,7 @@ def fill_edit_fields(context):
     u = s.unit(oid, gid)
     st.name, st.hp, st.attack, st.range = u['name'] or u['internal'], u['hp'], u['attack'], u['range']
     st.line_of_sight, st.reload_time, st.speed = u['line_of_sight'], u['reload_time'], u['speed']
+    st.can_attack_ground, st.can_attack_air = s.can_attack(oid)
     for a in gamedata.ARMORS:
         setattr(st, 'armor_' + a, u['armor_' + a])
     for c in gamedata.COSTS:
@@ -257,6 +263,7 @@ def apply_fields(context, s, oid, base_anims=None, base_oid=None, gid=None, refe
                 line_of_sight=st.line_of_sight, reload_time=st.reload_time, speed=st.speed,
                 armor={a: getattr(st, 'armor_' + a) for a in gamedata.ARMORS},
                 build_time=st.build_time, **{c: getattr(st, c) for c in gamedata.COSTS})
+    s.set_can_attack(oid, st.can_attack_ground, st.can_attack_air)
     if st.is_created and st.available_now != s.is_available_now(oid):
         s.set_available_now(oid, st.available_now)
     u = s.unit(oid, gid)
@@ -630,6 +637,10 @@ class EEUS_PT_panel(bpy.types.Panel):
         if fold(col, st, 'show_stats', 'Stats'):
             for prop in ('hp', 'attack', 'range', 'reload_time', 'line_of_sight', 'speed'):
                 col.prop(st, prop)
+            row = col.row(align=True)
+            row.label(text='Can Attack')
+            row.prop(st, 'can_attack_ground', toggle=True)
+            row.prop(st, 'can_attack_air', toggle=True)
         col = box.column(align=True)
         if fold(col, st, 'show_armor', 'Armor'):
             for a in gamedata.ARMORS:

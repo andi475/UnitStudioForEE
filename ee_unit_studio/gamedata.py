@@ -291,6 +291,23 @@ class EffectTable:
     def build(self):
         return b''.join(self.recs)
 
+class FamilyTable:
+    """dbfamily: u32 count, then per family (the kind of target a unit is,
+    dbobjects offset 104) name[100], u32 id, u32 index and 68 damage percents,
+    one per attack class (dbobjects offset 224): how much damage a unit of
+    that attack class does to this family; 0 = it cannot attack it."""
+    SIZE, CLASSES = 380, 68
+    def __init__(self, data):
+        n, = struct.unpack_from('<I', data, 0)
+        self.recs = [bytearray(data[4 + i * self.SIZE:4 + (i + 1) * self.SIZE]) for i in range(n)]
+    def build(self):
+        return struct.pack('<I', len(self.recs)) + b''.join(self.recs)
+    def column(self, c):
+        return [i32(r, 108 + 4 * c) for r in self.recs]
+    def set_column(self, c, values):
+        for r, v in zip(self.recs, values):
+            set_i32(r, 108 + 4 * c, v)
+
 class EventTable:
     """dbevents: name[100], u32 id, u32 count, count effect indices; no header.
     A tech's event (index at tech offset 116) fires when it is researched."""
@@ -317,6 +334,8 @@ OBJ = dict(id=116, hp=120, range=132, line_of_sight=136,
            speed=148, attack=192,
            armor=196,  # 6 ints in the order of ARMORS
            button=296, graphics=300, name_string=472,
+           family=104,  # kind of target it is (dbfamily record)
+           attack_class=224,  # kind of attack: which damage column of dbfamily it uses
            tech_count=884,  # how many entries of tech_list the game reads
            tech_key=888, tech_list=1156)
 # Costs: wood 124 (buildings, archers, ships), stone 128 (buildings), gold 136
@@ -335,7 +354,16 @@ EPOCHS = ['Prehistoric', 'Stone', 'Copper', 'Bronze', 'Dark', 'Middle', 'Renaiss
           'Industrial', 'Atomic WW1', 'Atomic WW2', 'Atomic Modern', 'Digital', 'Nano', 'Space']
 FIRST_STRING_ID = 40000  # Language.dll's own strings stop at 33005
 DB = {'objs': 'db\\dbobjects.dat', 'techs': 'db\\dbtechtree.dat', 'btns': 'db\\dbbuttons.dat',
-      'gfx': 'db\\dbgraphics.dat', 'effects': 'db\\dbeffects.dat', 'events': 'db\\dbevents.dat'}
+      'gfx': 'db\\dbgraphics.dat', 'effects': 'db\\dbeffects.dat', 'events': 'db\\dbevents.dat',
+      'families': 'db\\dbfamily.dat'}
+# families that fly (the Apollo mech hovers: the game's anti-air attacks hit it)
+AIR_FAMILIES = {'Aircraft', 'Bomber', 'Helicopter', 'Atomic Bomber', 'Aircraft Carrier Fighter', 'Space Fighter',
+                'Mech - Apollo'}
+# many ground units can hit helicopters (some even carrier planes, a little), so
+# 'can attack air' means: can damage the planes (fighters like the Spitfire)
+PLANES = 'Aircraft'
+AIR_ATTACK, GROUND_ATTACK = 7, 32  # damage percents used when an attack gains air / ground targets
+                                   # (attack classes of the Stinger Soldier and of the Marine)
 
 # ---------------------------------------------------------------- Language.dll
 def lang_strings(path):
@@ -441,6 +469,7 @@ class GameSession:
         self.gfx = GraphicsTable(unpack_file(self.aoc.read(DB['gfx'])))
         self.effects = EffectTable(unpack_file(self.aoc.read(DB['effects'])))
         self.events = EventTable(unpack_file(self.aoc.read(DB['events'])))
+        self.families = FamilyTable(unpack_file(self.aoc.read(DB['families'])))
         self.strings, _ = lang_strings(self.lang)
         self.new_strings = {}
         self.new_files = {}
@@ -603,8 +632,57 @@ class GameSession:
             data = unpack_file(Archive(orig).read(DB[key]))
             cache[key] = {'objs': lambda: FixedTable(data, OBJ_SIZE), 'btns': lambda: FixedTable(data, BTN_SIZE),
                           'techs': lambda: TechTree(data), 'gfx': lambda: GraphicsTable(data),
-                          'effects': lambda: EffectTable(data)}[key]()
+                          'effects': lambda: EffectTable(data), 'families': lambda: FamilyTable(data)}[key]()
         return cache[key]
+
+    # ------------------------------------------------------------ air / ground targets
+    def _air_rows(self):
+        return [name_of(r) in AIR_FAMILIES for r in self.families.recs]
+
+    def can_attack(self, oid):
+        """(ground targets, planes) the unit's attack class can damage."""
+        c = i32(self.objs.recs[oid], OBJ['attack_class'])
+        if not 0 <= c < FamilyTable.CLASSES:
+            return False, False
+        air, col = self._air_rows(), self.families.column(c)
+        planes = [name_of(r) for r in self.families.recs].index(PLANES)
+        return any(v for v, a in zip(col, air) if not a), col[planes] > 0
+
+    def set_can_attack(self, oid, ground, air):
+        """Let the unit attack ground and/or air targets. It gets an attack
+        class whose damage column is its current one with the air (or ground)
+        percents switched on - taken from the Stinger Soldier (Marine) - or
+        off. An identical existing class is shared; otherwise a free one is
+        used (the game has 68, a few of them unused)."""
+        if (ground, air) == self.can_attack(oid):
+            return
+        o = self.objs.recs[oid]
+        c = i32(o, OBJ['attack_class'])
+        n = len(self.families.recs)
+        col = self.families.column(c) if 0 <= c < FamilyTable.CLASSES else [0] * n
+        is_air = self._air_rows()
+        t_air, t_ground = self.families.column(AIR_ATTACK), self.families.column(GROUND_ATTACK)
+        had_ground = any(v for v, a in zip(col, is_air) if not a)
+        want = []
+        for i, (v, a) in enumerate(zip(col, is_air)):
+            if a:
+                want.append((v or t_air[i]) if air else 0)
+            else:
+                want.append((v if had_ground else t_ground[i]) if ground else 0)
+        cols = [self.families.column(k) for k in range(FamilyTable.CLASSES)]
+        target = next((k for k in range(FamilyTable.CLASSES) if cols[k] == want), None)
+        if target is None:
+            used = {i32(r, OBJ['attack_class']) for b, r in enumerate(self.objs.recs) if b and i32(r, OBJ['id']) == b}
+            if os.path.exists(self.ssa + '.orig'):  # classes of the original game stay theirs
+                oobjs = self._orig_table('objs')
+                used |= {i32(r, OBJ['attack_class']) for b, r in enumerate(oobjs.recs) if b and i32(r, OBJ['id']) == b}
+            free = [k for k in range(FamilyTable.CLASSES) if k not in used]
+            if not free:
+                raise GameError('no free attack class left in the game tables (units whose air/ground choice '
+                                'differs from the game share them; reset some units to free one)')
+            target = free[0]
+            self.families.set_column(target, want)
+        set_i32(o, OBJ['attack_class'], target)
 
     # ------------------------------------------------------------ icons
     @staticmethod
@@ -1171,7 +1249,7 @@ class GameSession:
         blobs.update(self.new_files)
         self._drop_unused_custom_files(blobs)
         for key, table in (('objs', self.objs), ('techs', self.techs), ('btns', self.btns), ('gfx', self.gfx),
-                           ('effects', self.effects), ('events', self.events)):
+                           ('effects', self.effects), ('events', self.events), ('families', self.families)):
             data = table.build()
             if data != unpack_file(blobs[DB[key]]):
                 blobs[DB[key]] = pack_file(data)
